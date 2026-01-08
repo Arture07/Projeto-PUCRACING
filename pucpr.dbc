@@ -1,0 +1,37 @@
+VERSION ""
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+
+BS_:
+
+BU_: Central Motor Suspensao
+
+BO_ 256 Motor: 8 Vector__XXX
+ SG_ RPM : 0|16@1+ (1,0) [0|14000] "rpm" Vector__XXX
+ SG_ Temperatura : 16|8@1+ (1,0) [0|150] "C" Vector__XXX
+ SG_ ThrottlePos : 24|8@1+ (1,0) [0|100] "%" Vector__XXX
+ SG_ Lambda : 32|8@1+ (0.01,0) [0.5|1.5] "lambda" Vector__XXX
+
+BO_ 272 Rodas: 8 Vector__XXX
+ SG_ WheelSpeed_FL : 0|8@1+ (1,0) [0|255] "kmh" Vector__XXX
+ SG_ WheelSpeed_FR : 8|8@1+ (1,0) [0|255] "kmh" Vector__XXX
+ SG_ WheelSpeed_RL : 16|8@1+ (1,0) [0|255] "kmh" Vector__XXX
+ SG_ WheelSpeed_RR : 24|8@1+ (1,0) [0|255] "kmh" Vector__XXX
+
+BO_ 512 Suspensao: 8 Vector__XXX
+ SG_ SuspensionPos_FL : 0|8@1+ (1,0) [0|255] "mm" Vector__XXX
+ SG_ SuspensionPos_FR : 8|8@1+ (1,0) [0|255] "mm" Vector__XXX
+ SG_ SuspensionPos_RL : 16|8@1+ (1,0) [0|255] "mm" Vector__XXX
+ SG_ SuspensionPos_RR : 24|8@1+ (1,0) [0|255] "mm" Vector__XXX
+
+BO_ 288 Direcao: 8 Vector__XXX
+ SG_ SteeringAngle : 0|16@1- (0.1,0) [-720|720] "deg" Vector__XXX
+ SG_ BrakePressure : 16|8@1+ (1,0) [0|255] "bar" Vector__XXX
+
+BO_ 768 IMU: 8 Vector__XXX
+ SG_ AccelX : 0|16@1- (0.001,0) [-4|4] "g" Vector__XXX
+ SG_ AccelY : 16|16@1- (0.001,0) [-4|4] "g" Vector__XXX

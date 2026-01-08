@@ -1,0 +1,15 @@
+2026-01-07 10:42:06,322 - ERROR - Erro fatal ao iniciar a aplicação:
+Traceback (most recent call last):
+  File "C:\Users\akmar\Documents\Curso_TI\Projeto PUCRACING\main_gui.py", line 719, in <module>
+    app = AppAnalisePUCPR() # Cria a instância da aplicação
+          ^^^^^^^^^^^^^^^^^
+  File "C:\Users\akmar\Documents\Curso_TI\Projeto PUCRACING\main_gui.py", line 131, in __init__
+    self._criar_area_tabs() # Cria a área com abas
+    ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\akmar\Documents\Curso_TI\Projeto PUCRACING\main_gui.py", line 294, in _criar_area_tabs
+    self._criar_conteudo_tempo_real()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2429, in __getattr__
+    return getattr(self.tk, attr)
+           ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: '_tkinter.tkapp' object has no attribute '_criar_conteudo_tempo_real'

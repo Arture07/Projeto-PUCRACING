@@ -15,6 +15,7 @@ from typing import Optional, Dict, List, Any # Para type hinting
 import threading
 import queue
 import time
+from collections import deque
 import can
 import cantools
 
@@ -114,6 +115,13 @@ class AppAnalisePUCPR(ctk.CTk):
         self.live_thread: Optional[threading.Thread] = None
         self.stop_live_event = threading.Event()
         self.is_live_active = False
+        
+        # Histórico para gráfico em tempo real
+        self.maxlen_plot = 100000 # Buffer grande para guardar histórico
+        self.live_data_storage: Dict[str, List[float]] = {'Time': []} # Inicializa com Time
+        self.selected_live_channels: List[str] = ['RPM', 'WheelSpeed_FL'] # Canais padrão
+        self.start_time_live = 0.0
+        self.auto_scroll = True # Estado do auto-scroll
 
         # --- Barra de Menu ---
         self._criar_menu()
@@ -223,7 +231,7 @@ class AppAnalisePUCPR(ctk.CTk):
         # Posiciona o TabView na grade da janela principal (linha 0, coluna 1)
         self.tabs_view.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew") # Diminui padx esquerdo
         # Adiciona as abas
-        self.tabs_view.add("📊 Geral / Plotagem"); self.tabs_view.add("↔️ Skid Pad"); self.tabs_view.add("🏁 Aceleração"); self.tabs_view.add("🏎️ Autocross / Endurance") # Adiciona ícones
+        self.tabs_view.add("📊 Geral / Plotagem"); self.tabs_view.add("↔️ Skid Pad"); self.tabs_view.add("🏁 Aceleração"); self.tabs_view.add("🏎️ Autocross / Endurance"); self.tabs_view.add("📡 Tempo Real") # Adiciona ícones
 
         # --- Conteúdo da Tab "Geral / Plotagem" ---
         tab_geral = self.tabs_view.tab("📊 Geral / Plotagem") # Obtém a referência da aba
@@ -289,6 +297,9 @@ class AppAnalisePUCPR(ctk.CTk):
         self.configurar_aba_especifica("↔️ Skid Pad", [("⚙️ Calcular Métricas", self.analisar_skidpad), ("📊 Plot Análise", self.plotar_skidpad)])
         self.configurar_aba_especifica("🏁 Aceleração", [("⚙️ Calcular Métricas", self.analisar_aceleracao), ("📊 Plot Análise", self.plotar_aceleracao)])
         self.configurar_aba_especifica("🏎️ Autocross / Endurance", [("⏱️ Calcular Voltas", self.analisar_tempos_volta), ("📈 Plot Hist. Susp.", self.plotar_histograma_suspensao), ("📉 Plot Delta-Time", self.plotar_delta_time_gui)])
+
+        # Configura a aba de Tempo Real
+        self._criar_conteudo_tempo_real()
 
     def _criar_status_bar(self):
         """Cria a barra de status na parte inferior."""
@@ -709,6 +720,618 @@ class AppAnalisePUCPR(ctk.CTk):
                             "- Mapa da Pista (GPS)\n"
                             "- Análises específicas (Skidpad, Aceleração, Voltas, etc.)\n"
                             "- Interface com tema escuro (CustomTkinter)")
+
+    # --- Funcionalidades de Tempo Real ---
+    def _criar_conteudo_tempo_real(self):
+        """Cria o conteúdo da aba de Tempo Real (Dashboard completo + Gráfico)."""
+        tab_live = self.tabs_view.tab("📡 Tempo Real")
+        tab_live.grid_columnconfigure(0, weight=1)
+        tab_live.grid_rowconfigure(1, weight=1) # Permite expansão vertical
+
+        # Frame de Controle
+        frame_live_ctrl = ctk.CTkFrame(tab_live, fg_color="transparent")
+        frame_live_ctrl.grid(row=0, column=0, pady=(15, 5), padx=20, sticky="ew")
+        
+        # Botões de Controle da Telemetria
+        frame_botoes_top = ctk.CTkFrame(frame_live_ctrl, fg_color="transparent")
+        frame_botoes_top.pack(fill="x")
+        
+        self.btn_live_toggle = ctk.CTkButton(frame_botoes_top, text="▶️ Iniciar Telemetria", 
+                                             command=self.toggle_live_telemetry,
+                                             fg_color=COLOR_ACCENT_RED, hover_color="#A00000",
+                                             font=self.LARGE_FONT_BOLD, height=35)
+        self.btn_live_toggle.pack(side="left", padx=(0, 20))
+        
+        self.lbl_live_status = ctk.CTkLabel(frame_botoes_top, text="Status: Parado", font=self.DEFAULT_FONT, text_color=COLOR_TEXT_SECONDARY)
+        self.lbl_live_status.pack(side="left")
+
+        # Configurações do Gráfico (Seleção e Auto-Scroll)
+        frame_config_grafico = ctk.CTkFrame(frame_live_ctrl, fg_color="transparent")
+        frame_config_grafico.pack(fill="x", pady=(10, 0))
+        
+        ctk.CTkButton(frame_config_grafico, text="📈 Selecionar Canais", command=self.abrir_seletor_canais_live,
+                      fg_color=COLOR_BG_TERTIARY, hover_color=COLOR_BORDER, border_width=1, border_color=COLOR_BORDER,
+                      width=150, height=28, font=self.DEFAULT_FONT).pack(side="left", padx=(0, 15))
+                      
+        self.switch_auto_scroll = ctk.CTkSwitch(frame_config_grafico, text="Auto-Scroll (Tempo Real)", command=self.toggle_auto_scroll)
+        self.switch_auto_scroll.select() # Padrão ligado
+        self.switch_auto_scroll.pack(side="left")
+
+        self.switch_normalize = ctk.CTkSwitch(frame_config_grafico, text="Normalizar Escalas", command=self.update_live_plot_style)
+        self.switch_normalize.pack(side="left", padx=10)
+
+        # ==================== ÁREA PRINCIPAL SPLIT (GRÁFICO À ESQUERDA, DASHBOARD À DIREITA) ====================
+        frame_main_content = ctk.CTkFrame(tab_live, fg_color="transparent")
+        frame_main_content.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        frame_main_content.grid_columnconfigure(0, weight=2) # Gráfico com mais espaço
+        frame_main_content.grid_columnconfigure(1, weight=1) # Dashboard
+        frame_main_content.grid_rowconfigure(0, weight=1)
+
+        # --- LADO ESQUERDO: GRÁFICO ---
+        frame_grafico_live = ctk.CTkFrame(frame_main_content, fg_color=COLOR_BG_TERTIARY, corner_radius=10, border_width=1, border_color=COLOR_BORDER)
+        frame_grafico_live.grid(row=0, column=0, padx=(0, 5), pady=0, sticky="nsew")
+        
+        # Cria Figure do Matplotlib
+        self.fig_live = Figure(figsize=(5, 4), dpi=100, facecolor=COLOR_BG_TERTIARY)
+        self.ax_live = self.fig_live.add_subplot(111)
+        self.ax_live.set_title("Monitoramento em Tempo Real (Normalizado)", color=COLOR_TEXT_PRIMARY, fontsize=10)
+        self.ax_live.set_xlabel("Segundos", color=COLOR_TEXT_SECONDARY, fontsize=8)
+        self.ax_live.grid(True, linestyle='--', alpha=0.3, color=COLOR_BORDER)
+        self.ax_live.tick_params(axis='x', colors=COLOR_TEXT_SECONDARY, labelsize=8)
+        self.ax_live.tick_params(axis='y', colors=COLOR_TEXT_SECONDARY, labelsize=8) # Eixo Y primário genérico
+        
+        # Dicionário para guardar as linhas plotadas: {'NomeCanal': Line2D}
+        self.live_lines: Dict[str, Any] = {}
+        # Dicionário para guardar escalas laterais secundárias se precisarmos (não usado na normalização simples, mas bom ter)
+        self.live_axes: Dict[str, Any] = {} 
+
+        # Canvas
+        self.canvas_live = FigureCanvasTkAgg(self.fig_live, master=frame_grafico_live)
+        self.canvas_live.get_tk_widget().pack(side=tk.TOP, fill="both", expand=True, padx=2, pady=2)
+        
+        # Toolbar para navegação (Zoom/Pan) - Importante para ver histórico
+        self.toolbar_live = NavigationToolbar2Tk(self.canvas_live, frame_grafico_live, pack_toolbar=False)
+        self.toolbar_live.configure(background=COLOR_BG_TERTIARY)
+        for widget in self.toolbar_live.winfo_children():
+            if isinstance(widget, (tk.Button, tk.Checkbutton)):
+                 try: widget.configure(background=COLOR_BG_TERTIARY, foreground=COLOR_TEXT_SECONDARY, relief=tk.FLAT, borderwidth=0)
+                 except: pass
+        self.toolbar_live.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=2)
+
+        # --- LADO DIREITO: DASHBOARD SCROLLABLE ---
+        scroll_dashboard = ctk.CTkScrollableFrame(frame_main_content, fg_color="transparent")
+        scroll_dashboard.grid(row=0, column=1, padx=(5, 0), pady=0, sticky="nsew")
+        
+        # --- Grupo MOTOR ---
+        self._criar_titulo_secao(scroll_dashboard, "MOTOR & ECU")
+        frame_motor = ctk.CTkFrame(scroll_dashboard, fg_color="transparent")
+        frame_motor.pack(fill="x", pady=5)
+        frame_motor.grid_columnconfigure((0,1), weight=1)
+        
+        self.lbl_val_rpm = self._criar_card_sensor(frame_motor, 0, 0, "RPM", "0", "rpm")
+        self.lbl_val_temp = self._criar_card_sensor(frame_motor, 0, 1, "Temp.", "0", "°C")
+        self.lbl_val_tps = self._criar_card_sensor(frame_motor, 1, 0, "TPS", "0", "%")
+        self.lbl_val_lambda = self._criar_card_sensor(frame_motor, 1, 1, "Lambda", "0.00", "λ")
+
+        # --- Grupo PILOTAGEM ---
+        self._criar_titulo_secao(scroll_dashboard, "PILOTAGEM")
+        frame_pilotagem = ctk.CTkFrame(scroll_dashboard, fg_color="transparent")
+        frame_pilotagem.pack(fill="x", pady=5)
+        frame_pilotagem.grid_columnconfigure((0,1), weight=1)
+        
+        self.lbl_val_steer = self._criar_card_sensor(frame_pilotagem, 0, 0, "Volante", "0.0", "deg")
+        self.lbl_val_brake = self._criar_card_sensor(frame_pilotagem, 0, 1, "Freio", "0", "bar")
+        self.lbl_val_accel_x = self._criar_card_sensor(frame_pilotagem, 1, 0, "Long G", "0.00", "g")
+        self.lbl_val_accel_y = self._criar_card_sensor(frame_pilotagem, 1, 1, "Lat G", "0.00", "g")
+
+        # --- Grupo RODAS ---
+        self._criar_titulo_secao(scroll_dashboard, "RODAS (KM/H)")
+        frame_rodas = ctk.CTkFrame(scroll_dashboard, fg_color="transparent")
+        frame_rodas.pack(fill="x", pady=5)
+        frame_rodas.grid_columnconfigure((0,1), weight=1)
+        
+        self.lbl_val_ws_fl = self._criar_card_sensor(frame_rodas, 0, 0, "FL", "0", "km/h")
+        self.lbl_val_ws_fr = self._criar_card_sensor(frame_rodas, 0, 1, "FR", "0", "km/h")
+        self.lbl_val_ws_rl = self._criar_card_sensor(frame_rodas, 1, 0, "RL", "0", "km/h")
+        self.lbl_val_ws_rr = self._criar_card_sensor(frame_rodas, 1, 1, "RR", "0", "km/h")
+
+        # --- Grupo SUSPENSÃO ---
+        self._criar_titulo_secao(scroll_dashboard, "SUSPENSÃO (mm)")
+        frame_susp = ctk.CTkFrame(scroll_dashboard, fg_color="transparent")
+        frame_susp.pack(fill="x", pady=5)
+        frame_susp.grid_columnconfigure((0,1), weight=1)
+        
+        self.lbl_val_susp_fl = self._criar_card_sensor(frame_susp, 0, 0, "FL", "0", "mm")
+        self.lbl_val_susp_fr = self._criar_card_sensor(frame_susp, 0, 1, "FR", "0", "mm")
+        self.lbl_val_susp_rl = self._criar_card_sensor(frame_susp, 1, 0, "RL", "0", "mm")
+        self.lbl_val_susp_rr = self._criar_card_sensor(frame_susp, 1, 1, "RR", "0", "mm")
+
+    def _criar_titulo_secao(self, parent, texto):
+        """Cria um divisor com título no dashboard."""
+        f = ctk.CTkFrame(parent, height=30, fg_color="transparent")
+        f.pack(fill="x", pady=(15, 5))
+        ctk.CTkLabel(f, text=texto, font=self.DEFAULT_FONT_BOLD, text_color=COLOR_ACCENT_GOLD, anchor="w").pack(side="left", padx=10)
+        ctk.CTkFrame(f, height=2, fg_color=COLOR_BORDER).pack(side="left", fill="x", expand=True, padx=10)
+
+    def _criar_card_sensor(self, parent, row, col, titulo, valor_inicial, unidade):
+        """Cria um card visual para exibir valor de sensor."""
+        frame = ctk.CTkFrame(parent, fg_color=COLOR_BG_TERTIARY, corner_radius=8, border_width=1, border_color=COLOR_BORDER)
+        frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew") # Padding reduzido
+        
+        ctk.CTkLabel(frame, text=titulo, font=self.DEFAULT_FONT_BOLD, text_color=COLOR_TEXT_SECONDARY).pack(pady=(5,0))
+        lbl_valor = ctk.CTkLabel(frame, text=valor_inicial, font=("Consolas", 20, "bold"), text_color=COLOR_TEXT_PRIMARY) # Fonte menor
+        lbl_valor.pack(pady=0)
+        ctk.CTkLabel(frame, text=unidade, font=self.SMALL_FONT, text_color=COLOR_TEXT_SECONDARY).pack(pady=(0,5))
+        return lbl_valor
+
+    def toggle_auto_scroll(self):
+        """Alterna o estado do auto-scroll."""
+        if self.switch_auto_scroll.get() == 1:
+            self.auto_scroll = True
+        else:
+            self.auto_scroll = False
+
+    def update_live_plot_style(self):
+        """Reconfigura completamente o gráfico ao vivo com base nos canais selecionados."""
+        print(f"[DEBUG] update_live_plot_style chamado. Canais: {self.selected_live_channels}")
+        
+        # Limpa completamente a figura
+        self.fig_live.clf()
+        self.ax_live = self.fig_live.add_subplot(111)
+        self.live_lines = {}
+        self.live_axes = {}
+        
+        # Configuração base do eixo X
+        self.ax_live.set_xlabel('Tempo (s)', color=COLOR_TEXT_SECONDARY, fontsize=9)
+        self.ax_live.grid(True, linestyle='--', alpha=0.3, color=COLOR_BORDER)
+        self.ax_live.tick_params(axis='x', colors=COLOR_TEXT_SECONDARY, labelsize=8)
+        self.ax_live.set_facecolor(COLOR_BG_SECONDARY)
+        
+        use_normalization = (self.switch_normalize.get() == 1)
+        n_channels = len(self.selected_live_channels)
+        
+        # Cores distintas para cada canal
+        colors = ["#FF3B30", "#FFD60A", "#00E5FF", "#76FF03"]  # Vermelho, Dourado, Ciano, Verde
+        
+        if not use_normalization:
+            # ===== MODO ABSOLUTO (Eixo Y único) =====
+            self.ax_live.set_title("Monitoramento em Tempo Real (Absoluto)", color=COLOR_TEXT_PRIMARY, fontsize=10, pad=10)
+            self.ax_live.set_ylabel('Valor', color=COLOR_TEXT_SECONDARY, fontsize=9)
+            self.ax_live.tick_params(axis='y', colors=COLOR_TEXT_SECONDARY, labelsize=8)
+            
+            for i, canal in enumerate(self.selected_live_channels):
+                color = colors[i % len(colors)]
+                line, = self.ax_live.plot([], [], label=canal, color=color, linewidth=2.0, alpha=0.9)
+                self.live_lines[canal] = line
+                self.live_axes[canal] = self.ax_live
+                
+                # Restaura dados históricos se existirem
+                if canal in self.live_data_storage and 'Time' in self.live_data_storage:
+                    t_data = self.live_data_storage['Time']
+                    y_data = self.live_data_storage[canal]
+                    if len(t_data) == len(y_data) and len(t_data) > 0:
+                        line.set_data(t_data, y_data)
+            
+            # Ajusta limites
+            self.ax_live.relim()
+            self.ax_live.autoscale_view()
+            
+        else:
+            # ===== MODO NORMALIZADO (Múltiplos Eixos Y) =====
+            self.ax_live.set_title("Monitoramento em Tempo Real (Escalas Ajustadas)", color=COLOR_TEXT_PRIMARY, fontsize=10, pad=10)
+            
+            # Ajusta margem direita baseado no número de canais
+            if n_channels <= 2:
+                self.fig_live.subplots_adjust(right=0.88)
+            elif n_channels == 3:
+                self.fig_live.subplots_adjust(right=0.82)
+            else:  # 4 canais
+                self.fig_live.subplots_adjust(right=0.76)
+            
+            host = self.ax_live
+            host.set_facecolor(COLOR_BG_SECONDARY)
+            
+            # Primeiro canal sempre no eixo host
+            color0 = colors[0]
+            host.set_ylabel(self.selected_live_channels[0], color=color0, fontsize=9, fontweight='bold')
+            host.tick_params(axis='y', labelcolor=color0, colors=color0, labelsize=8)
+            host.yaxis.label.set_color(color0)
+            
+            line0, = host.plot([], [], color=color0, linewidth=2.0, label=self.selected_live_channels[0], alpha=0.95)
+            self.live_lines[self.selected_live_channels[0]] = line0
+            self.live_axes[self.selected_live_channels[0]] = host
+            
+            # Restaura dados do primeiro canal
+            if self.selected_live_channels[0] in self.live_data_storage and 'Time' in self.live_data_storage:
+                t_data = self.live_data_storage['Time']
+                y_data = self.live_data_storage[self.selected_live_channels[0]]
+                if len(t_data) == len(y_data) and len(t_data) > 0:
+                    line0.set_data(t_data, y_data)
+                    host.relim()
+                    host.autoscale_view()
+                    # Adiciona margem vertical diferenciada para cada canal
+                    host.margins(y=0.15)
+            
+            # Cria eixos adicionais e plota
+            for i in range(1, n_channels):
+                canal = self.selected_live_channels[i]
+                color = colors[i % len(colors)]
+                
+                # Cria eixo twin
+                ax = host.twinx()
+                
+                # CRÍTICO: Faz o eixo completamente transparente
+                ax.set_frame_on(False)
+                ax.patch.set_visible(False)
+                
+                # Posiciona o spine direito
+                if i == 1:
+                    pass  # Posição padrão
+                elif i == 2:
+                    ax.spines['right'].set_position(('outward', 60))
+                elif i == 3:
+                    ax.spines['right'].set_position(('outward', 120))
+                
+                # Configuração visual
+                ax.set_ylabel(canal, color=color, fontsize=9, fontweight='bold')
+                ax.tick_params(axis='y', labelcolor=color, colors=color, labelsize=8)
+                ax.yaxis.label.set_color(color)
+                ax.spines['right'].set_edgecolor(color)
+                ax.spines['right'].set_linewidth(2.0)  # Spine mais grosso
+                ax.spines['right'].set_visible(True)
+                
+                # Remove outros spines
+                ax.spines['left'].set_visible(False)
+                ax.spines['top'].set_visible(False)
+                ax.spines['bottom'].set_visible(False)
+                
+                # Sem grid
+                ax.grid(False)
+                
+                # Plota linha mais GROSSA e com traço diferente para distinguir
+                linestyles = ['-', '-', '--', '-.']  # Sólido, Sólido, Tracejado, Traço-ponto
+                line, = ax.plot([], [], color=color, linewidth=2.5, label=canal, alpha=0.98, linestyle=linestyles[i])
+                self.live_lines[canal] = line
+                self.live_axes[canal] = ax
+                
+                # Restaura dados
+                if canal in self.live_data_storage and 'Time' in self.live_data_storage:
+                    t_data = self.live_data_storage['Time']
+                    y_data = self.live_data_storage[canal]
+                    if len(t_data) == len(y_data) and len(t_data) > 0:
+                        line.set_data(t_data, y_data)
+                        ax.relim()
+                        ax.autoscale_view()
+                        # Margem vertical progressiva para "espalhar" as linhas visualmente
+                        margin = 0.15 + (i * 0.05)
+                        ax.margins(y=margin)
+        
+        # ===== LEGENDA UNIVERSAL =====
+        all_lines = []
+        all_labels = []
+        
+        for canal in self.selected_live_channels:
+            if canal in self.live_lines:
+                all_lines.append(self.live_lines[canal])
+                all_labels.append(canal)
+        
+        if all_lines:
+            legend = self.ax_live.legend(
+                all_lines,
+                all_labels,
+                loc='upper left',
+                fontsize=9,
+                facecolor=COLOR_BG_TERTIARY,
+                edgecolor=COLOR_ACCENT_GOLD,
+                framealpha=0.92,
+                shadow=True
+            )
+            # Força cor branca no texto da legenda
+            for text in legend.get_texts():
+                text.set_color('#FFFFFF')
+        
+        print(f"[DEBUG] Gráfico reconfigurado com {len(self.live_lines)} linhas.")
+        self.canvas_live.draw_idle()
+
+
+    def abrir_seletor_canais_live(self):
+        """Abre uma janela popup para selecionar os canais do gráfico em tempo real."""
+        canais_possiveis = sorted(['RPM', 'Temperatura', 'ThrottlePos', 'Lambda', 
+                                   'SteeringAngle', 'BrakePressure', 'AccelX', 'AccelY',
+                                   'WheelSpeed_FL', 'WheelSpeed_FR', 'WheelSpeed_RL', 'WheelSpeed_RR',
+                                   'SuspensionPos_FL', 'SuspensionPos_FR', 'SuspensionPos_RL', 'SuspensionPos_RR'])
+        
+        popup = ctk.CTkToplevel(self)
+        popup.title("Selecionar Canais - Live Plot")
+        popup.geometry("320x450")
+        popup.grab_set()
+        
+        lbl = ctk.CTkLabel(popup, text="Selecione até 4 canais:", font=self.DEFAULT_FONT_BOLD)
+        lbl.pack(pady=10)
+        
+        # Label para mostrar quantos estão selecionados
+        lbl_count = ctk.CTkLabel(popup, text=f"Selecionados: {len(self.selected_live_channels)}/4", font=self.SMALL_FONT)
+        lbl_count.pack(pady=5)
+        
+        frame_scroll = ctk.CTkScrollableFrame(popup)
+        frame_scroll.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Dicionário para armazenar estados booleanos simples
+        checkboxes_state = {}
+        
+        def atualizar_contador():
+            count = sum(1 for v in checkboxes_state.values() if v.get())
+            lbl_count.configure(text=f"Selecionados: {count}/4")
+        
+        for canal in canais_possiveis:
+             is_selected = canal in self.selected_live_channels
+             var = tk.BooleanVar(value=is_selected)
+             checkboxes_state[canal] = var
+             
+             chk = ctk.CTkCheckBox(
+                 frame_scroll, 
+                 text=canal, 
+                 variable=var,
+                 command=atualizar_contador
+             )
+             chk.pack(anchor="w", pady=2)
+
+        def confirmar_selecao():
+            novos_selecionados = [canal for canal, var in checkboxes_state.items() if var.get()]
+            
+            if len(novos_selecionados) > 4:
+                messagebox.showwarning("Muitos Canais", "Selecione no máximo 4 canais para não poluir o gráfico.")
+                return
+            
+            if len(novos_selecionados) == 0:
+                messagebox.showwarning("Nenhum Canal", "Selecione pelo menos 1 canal.")
+                return
+                
+            self.selected_live_channels = novos_selecionados[:]
+            print(f"[DEBUG] Canais selecionados: {self.selected_live_channels}")
+            
+            # Reconfigura o gráfico
+            self.update_live_plot_style()
+            popup.destroy()
+
+        ctk.CTkButton(popup, text="Confirmar", command=confirmar_selecao, fg_color=COLOR_ACCENT_GOLD, text_color="black").pack(pady=10)
+
+    def toggle_live_telemetry(self):
+        """Alterna entre iniciar e parar a telemetria ao vivo."""
+        if not self.is_live_active:
+            self.start_live_telemetry()
+        else:
+            self.stop_live_telemetry()
+
+    def start_live_telemetry(self):
+        """Inicia a thread de leitura CAN."""
+        self.is_live_active = True
+        self.stop_live_event.clear()
+        
+        # Inicia dicionário de armazenamento
+        self.live_data_storage = {'Time': []}
+        
+        self.start_time_live = time.time()
+        
+        # Configura gráfico inicial
+        self.update_live_plot_style() # Usa a nova função para configurar eixos
+        
+        self.btn_live_toggle.configure(text="⏹️ Parar Telemetria", fg_color="#C62828") 
+        self.lbl_live_status.configure(text="Status: Conectado (Aguardando dados UDP 239.0.0.1...)")
+        
+        self.live_thread = threading.Thread(target=self.loop_leitura_can, daemon=True)
+        self.live_thread.start()
+        
+        self.after(100, self.update_live_gui)
+
+    def stop_live_telemetry(self):
+        """Para a thread de leitura CAN."""
+        self.is_live_active = False
+        self.stop_live_event.set()
+        self.btn_live_toggle.configure(text="▶️ Iniciar Telemetria", fg_color=COLOR_ACCENT_RED)
+        self.lbl_live_status.configure(text="Status: Parado")
+
+
+
+    def loop_leitura_can(self):
+        """Loop rodando em thread separada para ler CAN Bus."""
+        db = None
+        try:
+            # Tenta carregar DBC (mesmo diretório)
+            if os.path.exists('pucpr.dbc'):
+                 db = cantools.database.load_file('pucpr.dbc')
+            else:
+                 print("Aviso: pucpr.dbc não encontrado. Tentando ler raw.")
+        except Exception as e:
+            print(f"Erro ao carregar DBC na thread: {e}")
+
+        bus = None
+        try:
+            # Configuração Windows (UDP Multicast) - Igual ao simulator_carro.py / central.py
+            # Se for Linux/Rpi seria 'socketcan'
+            if platform.system() == "Windows":
+                 bus = can.interface.Bus(channel='239.0.0.1', interface='udp_multicast')
+            else: 
+                 # Fallback ou configuração linux (não testado aqui)
+                 bus = can.interface.Bus(channel='can0', bustype='socketcan')
+
+            print("Thread CAN iniciada.")
+            while not self.stop_live_event.is_set():
+                # Recebe com timeout para poder verificar o evento de parada
+                msg = bus.recv(0.5) 
+                if msg:
+                     try:
+                        if db:
+                            dados = db.decode_message(msg.arbitration_id, msg.data)
+                            self.live_queue.put(dados)
+                            # print(f"Dados CAN recebidos: {dados}") # Debug
+                        else:
+                            # Se não tem DBC, tenta algo genérico ou ignora
+                            pass
+                     except Exception as e_decode:
+                        # print(f"Erro decode: {e_decode}")
+                        pass
+        except Exception as e:
+            print(f"Erro na conexão CAN: {e}")
+            # Pode-se enviar mensagem para GUI via queue de status se quiser
+            self.stop_live_event.set()
+        finally:
+             if bus:
+                 bus.shutdown()
+             print("Thread CAN finalizada.")
+
+    def update_live_gui(self):
+        """Atualiza os labels da GUI consumindo a fila."""
+        if not self.is_live_active:
+            return
+
+        try:
+            # Processa tudo que está na fila (esvazia para pegar o mais recente)
+            dados_recentes = {}
+            pacotes_processados = 0
+            try:
+                while not self.live_queue.empty():
+                    d = self.live_queue.get_nowait()
+                    dados_recentes.update(d)
+                    pacotes_processados += 1
+            except queue.Empty:
+                pass
+            
+            if pacotes_processados > 0:
+                 self.lbl_live_status.configure(text="Status: Recebendo dados...")
+
+            # --- ATUALIZAÇÃO DO GRÁFICO E ARMAZENAMENTO ---
+            # Sincronização robusta de dados para prevenir erros de dimensão (numpy shape mismatch)
+            current_time_rel = time.time() - self.start_time_live
+            
+            if pacotes_processados > 0:
+                # 1. Atualiza o Tempo
+                if 'Time' not in self.live_data_storage: self.live_data_storage['Time'] = []
+                self.live_data_storage['Time'].append(current_time_rel)
+                
+                target_len = len(self.live_data_storage['Time'])
+                
+                # 2. Identifica todos os canais que precisamos rastrear
+                # (Os que já temos + os que chegaram agora + os que o usuário quer ver)
+                canais_para_atualizar = set(self.live_data_storage.keys()) | set(dados_recentes.keys()) | set(self.selected_live_channels)
+                canais_para_atualizar.discard('Time') # Remove Time da lista de canais de dados
+
+                for canal in canais_para_atualizar:
+                     if canal not in self.live_data_storage:
+                         self.live_data_storage[canal] = []
+                     
+                     # 3. Padding (Preenchimento): Garante que o histórico existe (com zeros) se o canal é novo
+                     current_len = len(self.live_data_storage[canal])
+                     missing_steps = target_len - 1 - current_len
+                     
+                     if missing_steps > 0:
+                         # Preenche lacunas com 0 
+                         self.live_data_storage[canal].extend([0] * missing_steps)
+
+                     # 4. Adiciona o valor atual
+                     valor = dados_recentes.get(canal)
+                     if valor is None:
+                         # Hold Last Value (Manter anterior) ou 0 se não tiver anterior
+                         if len(self.live_data_storage[canal]) > 0:
+                             valor = self.live_data_storage[canal][-1]
+                         else:
+                             valor = 0
+                     self.live_data_storage[canal].append(valor)
+
+                # --- PLOTAGEM DE PERFORMANCE (SLICING) ---
+                t_data_full = self.live_data_storage['Time']
+                start_idx = 0
+                
+                # Otimização: Se tiver muitos pontos e Auto-Scroll ligado, plota apenas a janela visível + margem
+                # Isso evita que o matplotlib precise processar milhares de pontos for do canvas
+                if self.auto_scroll and len(t_data_full) > 300:
+                     window_secs = 12.0 # Janela de 10s + margem
+                     last_time = t_data_full[-1]
+                     target_time = last_time - window_secs
+                     
+                     # Busca simples reverso para encontrar ponto de corte
+                     # (Mais eficiente que iterar tudo se a janela for pequena comparada ao todo)
+                     for i in range(len(t_data_full)-1, -1, -1):
+                         if t_data_full[i] < target_time:
+                             start_idx = i
+                             break
+
+                # Cria slices para plotagem
+                t_data_plot = t_data_full[start_idx:]
+
+                if self.switch_normalize.get() == 1:
+                    # MODO NORMALIZADO: Múltiplos Eixos
+                    for canal in self.selected_live_channels:
+                        # Só tenta plotar se o canal realmente tem dados sincronizados
+                        if canal in self.live_data_storage and canal in self.live_lines:
+                            line = self.live_lines[canal]
+                            # Garante que X e Y tem o mesmo tamanho antes do slice
+                            y_data_full = self.live_data_storage[canal]
+                            
+                            if len(t_data_full) == len(y_data_full):
+                                # Aplica o mesmo slice
+                                line.set_data(t_data_plot, y_data_full[start_idx:])
+                                
+                                # Re-escala eixo apropriado
+                                if canal in self.live_axes:
+                                    ax = self.live_axes[canal]
+                                    ax.relim(); ax.autoscale_view(scalex=False, scaley=True)
+                                else:
+                                    self.ax_live.relim(); self.ax_live.autoscale_view(scalex=False, scaley=True)
+
+                else:
+                    # MODO ABSOLUTO
+                    for canal, line in self.live_lines.items():
+                        if canal in self.live_data_storage:
+                            y_data_full = self.live_data_storage[canal]
+                            if len(t_data_full) == len(y_data_full):
+                                line.set_data(t_data_plot, y_data_full[start_idx:])
+                    
+                    self.ax_live.relim()
+                    self.ax_live.autoscale_view(scalex=False, scaley=True)
+                
+                # Auto-Scroll logic (View Limits)
+                # Mantém os limites do X corretos mesmo com o slice, pois o tempo continua absoluto
+                if self.auto_scroll:
+                    window_size = 10.0
+                    if current_time_rel > window_size:
+                        self.ax_live.set_xlim(current_time_rel - window_size, current_time_rel)
+                    else:
+                        self.ax_live.set_xlim(0, max(current_time_rel, window_size))
+                    
+                self.canvas_live.draw_idle()
+
+
+            # Atualiza labels e dashboard
+            if 'RPM' in dados_recentes: self.lbl_val_rpm.configure(text=f"{dados_recentes['RPM']:.0f}")
+            if 'Temperatura' in dados_recentes: self.lbl_val_temp.configure(text=f"{dados_recentes['Temperatura']:.0f}")
+            if 'ThrottlePos' in dados_recentes: self.lbl_val_tps.configure(text=f"{dados_recentes['ThrottlePos']:.0f}")
+            if 'Lambda' in dados_recentes: self.lbl_val_lambda.configure(text=f"{dados_recentes['Lambda']:.2f}")
+
+            # Pilotagem / IMU
+            if 'SteeringAngle' in dados_recentes: self.lbl_val_steer.configure(text=f"{dados_recentes['SteeringAngle']:.1f}")
+            if 'BrakePressure' in dados_recentes: self.lbl_val_brake.configure(text=f"{dados_recentes['BrakePressure']:.0f}")
+            if 'AccelX' in dados_recentes: self.lbl_val_accel_x.configure(text=f"{dados_recentes['AccelX']:.2f}")
+            if 'AccelY' in dados_recentes: self.lbl_val_accel_y.configure(text=f"{dados_recentes['AccelY']:.2f}")
+            
+            # Rodas
+            if 'WheelSpeed_FL' in dados_recentes: self.lbl_val_ws_fl.configure(text=f"{dados_recentes['WheelSpeed_FL']:.0f}")
+            if 'WheelSpeed_FR' in dados_recentes: self.lbl_val_ws_fr.configure(text=f"{dados_recentes['WheelSpeed_FR']:.0f}")
+            if 'WheelSpeed_RL' in dados_recentes: self.lbl_val_ws_rl.configure(text=f"{dados_recentes['WheelSpeed_RL']:.0f}")
+            if 'WheelSpeed_RR' in dados_recentes: self.lbl_val_ws_rr.configure(text=f"{dados_recentes['WheelSpeed_RR']:.0f}")
+
+            # Suspensão
+            if 'SuspensionPos_FL' in dados_recentes: self.lbl_val_susp_fl.configure(text=f"{dados_recentes['SuspensionPos_FL']:.0f}")
+            if 'SuspensionPos_FR' in dados_recentes: self.lbl_val_susp_fr.configure(text=f"{dados_recentes['SuspensionPos_FR']:.0f}")
+            if 'SuspensionPos_RL' in dados_recentes: self.lbl_val_susp_rl.configure(text=f"{dados_recentes['SuspensionPos_RL']:.0f}")
+            if 'SuspensionPos_RR' in dados_recentes: self.lbl_val_susp_rr.configure(text=f"{dados_recentes['SuspensionPos_RR']:.0f}")
+        
+        except Exception as e:
+            print(f"Erro no update_live_gui (Recuperado): {e}")
+
+        # Reagendar a si mesmo com taxa menor (10 FPS) para economizar CPU
+        if self.is_live_active:
+            self.after(100, self.update_live_gui)
 
 # --- Bloco Principal ---
 if __name__ == "__main__":

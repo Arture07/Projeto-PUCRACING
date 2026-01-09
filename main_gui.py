@@ -123,6 +123,20 @@ class AppAnalisePUCPR(ctk.CTk):
         self.start_time_live = 0.0
         self.auto_scroll = True # Estado do auto-scroll
 
+        # Freeze do gráfico (continua armazenando dados, só não redesenha)
+        self.live_freeze = False
+
+        # Indicador de taxa (Hz) da telemetria recebida
+        self._live_hz_times = deque(maxlen=50)
+
+        # --- Hover do gráfico ao vivo (tooltip) ---
+        self._live_hover_cids: List[int] = []
+        self._live_hover_last_idx: Optional[int] = None
+        self._live_hover_text = None
+        self._live_hover_vline = None
+        self._live_hover_pinned = False
+        self._live_hover_pinned_idx: Optional[int] = None
+
         # --- Barra de Menu ---
         self._criar_menu()
 
@@ -143,6 +157,265 @@ class AppAnalisePUCPR(ctk.CTk):
 
         # Atualiza estado inicial dos botões (desabilitados até carregar log)
         self.habilitar_botoes_pos_carga(False)
+
+    def _format_hover_value(self, value: float) -> str:
+        try:
+            v = float(value)
+        except Exception:
+            return str(value)
+        av = abs(v)
+        if av >= 1000:
+            return f"{v:.0f}"
+        if av >= 100:
+            return f"{v:.1f}"
+        return f"{v:.2f}"
+
+    def _hide_live_hover(self):
+        if self._live_hover_vline is not None:
+            try:
+                self._live_hover_vline.set_visible(False)
+            except Exception:
+                pass
+        if self._live_hover_text is not None:
+            try:
+                self._live_hover_text.set_visible(False)
+            except Exception:
+                pass
+
+    def toggle_live_freeze(self):
+        """Congela/descongela apenas o redesenho do gráfico ao vivo."""
+        try:
+            self.live_freeze = bool(self.switch_freeze.get() == 1)
+            if self.live_freeze:
+                self.lbl_live_status.configure(text="Status: Congelado (recebendo dados)")
+            else:
+                # Volta ao status padrão na próxima atualização
+                pass
+        except Exception:
+            pass
+
+    def reset_live_view(self):
+        """Volta para a visão padrão (auto-scroll, sem freeze, sem pin)."""
+        try:
+            self.live_freeze = False
+            if hasattr(self, 'switch_freeze'):
+                self.switch_freeze.deselect()
+
+            self.auto_scroll = True
+            if hasattr(self, 'switch_auto_scroll'):
+                self.switch_auto_scroll.select()
+
+            # Desfixa tooltip
+            self._live_hover_pinned = False
+            self._live_hover_pinned_idx = None
+            self._hide_live_hover()
+
+            # Reseta zoom/pan do matplotlib (se disponível)
+            if hasattr(self, 'toolbar_live'):
+                try:
+                    self.toolbar_live.home()
+                except Exception:
+                    pass
+
+            self.canvas_live.draw_idle()
+        except Exception:
+            pass
+
+    def _apply_live_subplot_layout(self, n_channels: int, use_normalization: bool):
+        """Aplica um layout consistente (equivalente ao subplot tool) no gráfico ao vivo."""
+        try:
+            left = 0.057
+            bottom = 0.07
+            top = 0.945
+
+            if use_normalization:
+                # Espaço extra na direita para múltiplos eixos
+                right = 0.795
+            else:
+                right = 0.95
+
+            self.fig_live.subplots_adjust(left=left, bottom=bottom, right=right, top=top)
+        except Exception:
+            pass
+
+    def _setup_live_hover_artists(self):
+        """(Re)cria os elementos visuais do hover no gráfico ao vivo.
+
+        Precisa ser chamado após limpar/recriar a figura/axes.
+        """
+        self._live_hover_last_idx = None
+        self._live_hover_pinned = False
+        self._live_hover_pinned_idx = None
+        try:
+            # Linha vertical no eixo principal
+            self._live_hover_vline = self.ax_live.axvline(
+                0,
+                color=COLOR_TEXT_SECONDARY,
+                alpha=0.35,
+                linewidth=1.0,
+                linestyle='--',
+                zorder=1,
+                visible=False,
+            )
+        except Exception:
+            self._live_hover_vline = None
+
+        try:
+            # Caixa de texto no Figure (coordenadas normalizadas 0..1)
+            self._live_hover_text = self.fig_live.text(
+                0.02,
+                0.02,
+                "",
+                transform=self.fig_live.transFigure,
+                ha='left',
+                va='bottom',
+                fontsize=10,
+                color=COLOR_TEXT_PRIMARY,
+                bbox=dict(
+                    boxstyle="round,pad=0.35",
+                    facecolor=COLOR_BG_TERTIARY,
+                    edgecolor=COLOR_ACCENT_GOLD,
+                    alpha=0.92,
+                ),
+                zorder=10,
+            )
+            self._live_hover_text.set_visible(False)
+        except Exception:
+            self._live_hover_text = None
+
+    def _on_live_plot_hover(self, event):
+        """Mostra tooltip com valores dos canais selecionados no X do cursor."""
+        try:
+            # Não atrapalhar pan/zoom da toolbar
+            if hasattr(self, 'toolbar_live') and getattr(self.toolbar_live, 'mode', ''):
+                self._hide_live_hover()
+                self.canvas_live.draw_idle()
+                return
+
+            # Se estiver fixado por clique, não atualiza no movimento
+            if self._live_hover_pinned:
+                return
+
+            if event is None or event.inaxes is None or event.xdata is None:
+                self._hide_live_hover()
+                self.canvas_live.draw_idle()
+                return
+
+            if 'Time' not in self.live_data_storage:
+                self._hide_live_hover()
+                self.canvas_live.draw_idle()
+                return
+
+            t_list = self.live_data_storage.get('Time', [])
+            if not t_list or len(t_list) < 2:
+                self._hide_live_hover()
+                self.canvas_live.draw_idle()
+                return
+
+            x = float(event.xdata)
+            t_arr = np.asarray(t_list, dtype=float)
+            idx = int(np.searchsorted(t_arr, x, side='left'))
+            if idx <= 0:
+                idx = 0
+            elif idx >= len(t_arr):
+                idx = len(t_arr) - 1
+            else:
+                # Escolhe o mais próximo entre idx-1 e idx
+                if abs(t_arr[idx] - x) > abs(x - t_arr[idx - 1]):
+                    idx = idx - 1
+
+            if self._live_hover_last_idx == idx and self._live_hover_text is not None and self._live_hover_text.get_visible():
+                return
+            self._live_hover_last_idx = idx
+
+            t_val = t_arr[idx]
+            lines = [f"t = {t_val:.2f} s"]
+            for canal in self.selected_live_channels:
+                y_list = self.live_data_storage.get(canal)
+                if not y_list or idx >= len(y_list):
+                    continue
+                y_val = y_list[idx]
+                lines.append(f"{canal}: {self._format_hover_value(y_val)}")
+
+            if self._live_hover_text is not None:
+                # Posiciona a caixa perto do cursor (em coordenadas de Figure)
+                fx, fy = self.fig_live.transFigure.inverted().transform((event.x, event.y))
+                fx = float(np.clip(fx + 0.01, 0.02, 0.78))
+                fy = float(np.clip(fy + 0.01, 0.02, 0.78))
+                self._live_hover_text.set_position((fx, fy))
+                self._live_hover_text.set_text("\n".join(lines))
+                self._live_hover_text.set_visible(True)
+
+            if self._live_hover_vline is not None:
+                self._live_hover_vline.set_xdata([t_val, t_val])
+                self._live_hover_vline.set_visible(True)
+
+            self.canvas_live.draw_idle()
+        except Exception:
+            # Hover nunca pode derrubar a UI
+            try:
+                self._hide_live_hover()
+                self.canvas_live.draw_idle()
+            except Exception:
+                pass
+
+    def _on_live_plot_click(self, event):
+        """Clique no gráfico fixa/desfixa o tooltip naquele instante."""
+        try:
+            if event is None or event.inaxes is None or event.xdata is None:
+                return
+            if 'Time' not in self.live_data_storage:
+                return
+
+            t_list = self.live_data_storage.get('Time', [])
+            if not t_list:
+                return
+
+            x = float(event.xdata)
+            t_arr = np.asarray(t_list, dtype=float)
+            idx = int(np.searchsorted(t_arr, x, side='left'))
+            if idx <= 0:
+                idx = 0
+            elif idx >= len(t_arr):
+                idx = len(t_arr) - 1
+            else:
+                if abs(t_arr[idx] - x) > abs(x - t_arr[idx - 1]):
+                    idx = idx - 1
+
+            if self._live_hover_pinned and self._live_hover_pinned_idx == idx:
+                # Segundo clique no mesmo ponto: desfixa
+                self._live_hover_pinned = False
+                self._live_hover_pinned_idx = None
+                return
+
+            # Fixa no idx calculado
+            self._live_hover_pinned = True
+            self._live_hover_pinned_idx = idx
+
+            # Reusa a lógica de render do hover com posição do clique
+            t_val = float(t_arr[idx])
+            lines = [f"t = {t_val:.2f} s"]
+            for canal in self.selected_live_channels:
+                y_list = self.live_data_storage.get(canal)
+                if not y_list or idx >= len(y_list):
+                    continue
+                lines.append(f"{canal}: {self._format_hover_value(y_list[idx])}")
+
+            if self._live_hover_text is not None:
+                fx, fy = self.fig_live.transFigure.inverted().transform((event.x, event.y))
+                fx = float(np.clip(fx + 0.01, 0.02, 0.78))
+                fy = float(np.clip(fy + 0.01, 0.02, 0.78))
+                self._live_hover_text.set_position((fx, fy))
+                self._live_hover_text.set_text("\n".join(lines))
+                self._live_hover_text.set_visible(True)
+
+            if self._live_hover_vline is not None:
+                self._live_hover_vline.set_xdata([t_val, t_val])
+                self._live_hover_vline.set_visible(True)
+
+            self.canvas_live.draw_idle()
+        except Exception:
+            pass
 
     def _criar_menu(self):
         """Cria a barra de menus da aplicação."""
@@ -745,6 +1018,10 @@ class AppAnalisePUCPR(ctk.CTk):
         self.lbl_live_status = ctk.CTkLabel(frame_botoes_top, text="Status: Parado", font=self.DEFAULT_FONT, text_color=COLOR_TEXT_SECONDARY)
         self.lbl_live_status.pack(side="left")
 
+        # Indicador de taxa do stream
+        self.lbl_live_hz = ctk.CTkLabel(frame_botoes_top, text="Hz: --", font=self.SMALL_FONT, text_color=COLOR_TEXT_SECONDARY)
+        self.lbl_live_hz.pack(side="right")
+
         # Configurações do Gráfico (Seleção e Auto-Scroll)
         frame_config_grafico = ctk.CTkFrame(frame_live_ctrl, fg_color="transparent")
         frame_config_grafico.pack(fill="x", pady=(10, 0))
@@ -760,6 +1037,22 @@ class AppAnalisePUCPR(ctk.CTk):
         self.switch_normalize = ctk.CTkSwitch(frame_config_grafico, text="Normalizar Escalas", command=self.update_live_plot_style)
         self.switch_normalize.pack(side="left", padx=10)
 
+        self.switch_freeze = ctk.CTkSwitch(frame_config_grafico, text="Congelar Gráfico", command=self.toggle_live_freeze)
+        self.switch_freeze.pack(side="left", padx=10)
+
+        ctk.CTkButton(
+            frame_config_grafico,
+            text="↺ Reset View",
+            command=self.reset_live_view,
+            fg_color=COLOR_BG_TERTIARY,
+            hover_color=COLOR_BORDER,
+            border_width=1,
+            border_color=COLOR_BORDER,
+            width=110,
+            height=28,
+            font=self.DEFAULT_FONT,
+        ).pack(side="left", padx=(10, 0))
+
         # ==================== ÁREA PRINCIPAL SPLIT (GRÁFICO À ESQUERDA, DASHBOARD À DIREITA) ====================
         frame_main_content = ctk.CTkFrame(tab_live, fg_color="transparent")
         frame_main_content.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
@@ -771,8 +1064,8 @@ class AppAnalisePUCPR(ctk.CTk):
         frame_grafico_live = ctk.CTkFrame(frame_main_content, fg_color=COLOR_BG_TERTIARY, corner_radius=10, border_width=1, border_color=COLOR_BORDER)
         frame_grafico_live.grid(row=0, column=0, padx=(0, 5), pady=0, sticky="nsew")
         
-        # Cria Figure do Matplotlib
-        self.fig_live = Figure(figsize=(5, 4), dpi=100, facecolor=COLOR_BG_TERTIARY)
+        # Cria Figure do Matplotlib com tamanho aumentado
+        self.fig_live = Figure(figsize=(8, 5.5), dpi=100, facecolor=COLOR_BG_TERTIARY)
         self.ax_live = self.fig_live.add_subplot(111)
         self.ax_live.set_title("Monitoramento em Tempo Real (Normalizado)", color=COLOR_TEXT_PRIMARY, fontsize=10)
         self.ax_live.set_xlabel("Segundos", color=COLOR_TEXT_SECONDARY, fontsize=8)
@@ -797,6 +1090,15 @@ class AppAnalisePUCPR(ctk.CTk):
                  try: widget.configure(background=COLOR_BG_TERTIARY, foreground=COLOR_TEXT_SECONDARY, relief=tk.FLAT, borderwidth=0)
                  except: pass
         self.toolbar_live.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=2)
+
+        # Hover tooltip (valores no cursor)
+        if not getattr(self, '_live_hover_cids', []):
+            self._live_hover_cids = [
+                self.canvas_live.mpl_connect('motion_notify_event', self._on_live_plot_hover),
+                self.canvas_live.mpl_connect('figure_leave_event', lambda _evt: (self._hide_live_hover(), self.canvas_live.draw_idle())),
+                self.canvas_live.mpl_connect('button_press_event', self._on_live_plot_click),
+            ]
+        self._setup_live_hover_artists()
 
         # --- LADO DIREITO: DASHBOARD SCROLLABLE ---
         scroll_dashboard = ctk.CTkScrollableFrame(frame_main_content, fg_color="transparent")
@@ -871,6 +1173,15 @@ class AppAnalisePUCPR(ctk.CTk):
         else:
             self.auto_scroll = False
 
+            # Ao desligar, abre o eixo X para facilitar navegar no histórico
+            try:
+                t_data = self.live_data_storage.get('Time', [])
+                if t_data and len(t_data) >= 2:
+                    self.ax_live.set_xlim(0, t_data[-1])
+                    self.canvas_live.draw_idle()
+            except Exception:
+                pass
+
     def update_live_plot_style(self):
         """Reconfigura completamente o gráfico ao vivo com base nos canais selecionados."""
         print(f"[DEBUG] update_live_plot_style chamado. Canais: {self.selected_live_channels}")
@@ -889,6 +1200,9 @@ class AppAnalisePUCPR(ctk.CTk):
         
         use_normalization = (self.switch_normalize.get() == 1)
         n_channels = len(self.selected_live_channels)
+
+        # Layout fixo (tamanho/margens) para combinar com o ajuste manual do subplot tool
+        self._apply_live_subplot_layout(n_channels=n_channels, use_normalization=use_normalization)
         
         # Cores distintas para cada canal
         colors = ["#FF3B30", "#FFD60A", "#00E5FF", "#76FF03"]  # Vermelho, Dourado, Ciano, Verde
@@ -919,14 +1233,8 @@ class AppAnalisePUCPR(ctk.CTk):
         else:
             # ===== MODO NORMALIZADO (Múltiplos Eixos Y) =====
             self.ax_live.set_title("Monitoramento em Tempo Real (Escalas Ajustadas)", color=COLOR_TEXT_PRIMARY, fontsize=10, pad=10)
-            
-            # Ajusta margem direita baseado no número de canais
-            if n_channels <= 2:
-                self.fig_live.subplots_adjust(right=0.88)
-            elif n_channels == 3:
-                self.fig_live.subplots_adjust(right=0.82)
-            else:  # 4 canais
-                self.fig_live.subplots_adjust(right=0.76)
+
+            # Mantém o layout definido em _apply_live_subplot_layout
             
             host = self.ax_live
             host.set_facecolor(COLOR_BG_SECONDARY)
@@ -1030,6 +1338,9 @@ class AppAnalisePUCPR(ctk.CTk):
             for text in legend.get_texts():
                 text.set_color('#FFFFFF')
         
+        # Recria elementos do hover (a figura foi limpa)
+        self._setup_live_hover_artists()
+
         print(f"[DEBUG] Gráfico reconfigurado com {len(self.live_lines)} linhas.")
         self.canvas_live.draw_idle()
 
@@ -1200,6 +1511,31 @@ class AppAnalisePUCPR(ctk.CTk):
             if pacotes_processados > 0:
                  self.lbl_live_status.configure(text="Status: Recebendo dados...")
 
+                 # Se usuário estiver usando Pan/Zoom da toolbar, não force auto-scroll
+                 try:
+                     toolbar_mode = getattr(self.toolbar_live, 'mode', '') if hasattr(self, 'toolbar_live') else ''
+                     if toolbar_mode and self.auto_scroll:
+                         self.auto_scroll = False
+                         if hasattr(self, 'switch_auto_scroll'):
+                             self.switch_auto_scroll.deselect()
+
+                         # Abre o eixo X para facilitar navegar no histórico
+                         t_data = self.live_data_storage.get('Time', [])
+                         if t_data and len(t_data) >= 2:
+                             self.ax_live.set_xlim(0, t_data[-1])
+                 except Exception:
+                     pass
+
+                 # Atualiza indicador de Hz (com base no tempo relativo)
+                 try:
+                     self._live_hz_times.append(current_time_rel)
+                     if len(self._live_hz_times) >= 2:
+                         dt = self._live_hz_times[-1] - self._live_hz_times[0]
+                         hz = (len(self._live_hz_times) - 1) / dt if dt > 1e-6 else 0.0
+                         self.lbl_live_hz.configure(text=f"Hz: {hz:0.1f}")
+                 except Exception:
+                     pass
+
             # --- ATUALIZAÇÃO DO GRÁFICO E ARMAZENAMENTO ---
             # Sincronização robusta de dados para prevenir erros de dimensão (numpy shape mismatch)
             current_time_rel = time.time() - self.start_time_live
@@ -1239,67 +1575,59 @@ class AppAnalisePUCPR(ctk.CTk):
                      self.live_data_storage[canal].append(valor)
 
                 # --- PLOTAGEM DE PERFORMANCE (SLICING) ---
-                t_data_full = self.live_data_storage['Time']
-                start_idx = 0
-                
-                # Otimização: Se tiver muitos pontos e Auto-Scroll ligado, plota apenas a janela visível + margem
-                # Isso evita que o matplotlib precise processar milhares de pontos for do canvas
-                if self.auto_scroll and len(t_data_full) > 300:
-                     window_secs = 12.0 # Janela de 10s + margem
-                     last_time = t_data_full[-1]
-                     target_time = last_time - window_secs
-                     
-                     # Busca simples reverso para encontrar ponto de corte
-                     # (Mais eficiente que iterar tudo se a janela for pequena comparada ao todo)
-                     for i in range(len(t_data_full)-1, -1, -1):
-                         if t_data_full[i] < target_time:
-                             start_idx = i
-                             break
-
-                # Cria slices para plotagem
-                t_data_plot = t_data_full[start_idx:]
-
-                if self.switch_normalize.get() == 1:
-                    # MODO NORMALIZADO: Múltiplos Eixos
-                    for canal in self.selected_live_channels:
-                        # Só tenta plotar se o canal realmente tem dados sincronizados
-                        if canal in self.live_data_storage and canal in self.live_lines:
-                            line = self.live_lines[canal]
-                            # Garante que X e Y tem o mesmo tamanho antes do slice
-                            y_data_full = self.live_data_storage[canal]
-                            
-                            if len(t_data_full) == len(y_data_full):
-                                # Aplica o mesmo slice
-                                line.set_data(t_data_plot, y_data_full[start_idx:])
-                                
-                                # Re-escala eixo apropriado
-                                if canal in self.live_axes:
-                                    ax = self.live_axes[canal]
-                                    ax.relim(); ax.autoscale_view(scalex=False, scaley=True)
-                                else:
-                                    self.ax_live.relim(); self.ax_live.autoscale_view(scalex=False, scaley=True)
-
-                else:
-                    # MODO ABSOLUTO
-                    for canal, line in self.live_lines.items():
-                        if canal in self.live_data_storage:
-                            y_data_full = self.live_data_storage[canal]
-                            if len(t_data_full) == len(y_data_full):
-                                line.set_data(t_data_plot, y_data_full[start_idx:])
+                # Se estiver congelado, não redesenha (mas continua armazenando dados)
+                if not self.live_freeze:
+                    t_data_full = self.live_data_storage['Time']
+                    start_idx = 0
                     
-                    self.ax_live.relim()
-                    self.ax_live.autoscale_view(scalex=False, scaley=True)
-                
-                # Auto-Scroll logic (View Limits)
-                # Mantém os limites do X corretos mesmo com o slice, pois o tempo continua absoluto
-                if self.auto_scroll:
-                    window_size = 10.0
-                    if current_time_rel > window_size:
-                        self.ax_live.set_xlim(current_time_rel - window_size, current_time_rel)
+                    # Otimização: Se tiver muitos pontos e Auto-Scroll ligado, plota apenas a janela visível + margem
+                    if self.auto_scroll and len(t_data_full) > 300:
+                         window_secs = 12.0 # Janela de 10s + margem
+                         last_time = t_data_full[-1]
+                         target_time = last_time - window_secs
+                         for i in range(len(t_data_full)-1, -1, -1):
+                             if t_data_full[i] < target_time:
+                                 start_idx = i
+                                 break
+
+                    t_data_plot = t_data_full[start_idx:]
+
+                    if self.switch_normalize.get() == 1:
+                        for canal in self.selected_live_channels:
+                            if canal in self.live_data_storage and canal in self.live_lines:
+                                line = self.live_lines[canal]
+                                y_data_full = self.live_data_storage[canal]
+                                if len(t_data_full) == len(y_data_full):
+                                    line.set_data(t_data_plot, y_data_full[start_idx:])
+                                    if canal in self.live_axes:
+                                        ax = self.live_axes[canal]
+                                        ax.relim(); ax.autoscale_view(scalex=False, scaley=True)
+                                    else:
+                                        self.ax_live.relim(); self.ax_live.autoscale_view(scalex=False, scaley=True)
                     else:
-                        self.ax_live.set_xlim(0, max(current_time_rel, window_size))
+                        for canal, line in self.live_lines.items():
+                            if canal in self.live_data_storage:
+                                y_data_full = self.live_data_storage[canal]
+                                if len(t_data_full) == len(y_data_full):
+                                    line.set_data(t_data_plot, y_data_full[start_idx:])
+
+                        self.ax_live.relim()
+                        self.ax_live.autoscale_view(scalex=False, scaley=True)
                     
-                self.canvas_live.draw_idle()
+                    # Não sobrescreve o eixo X se o usuário estiver navegando (pan/zoom)
+                    try:
+                        toolbar_mode = getattr(self.toolbar_live, 'mode', '') if hasattr(self, 'toolbar_live') else ''
+                    except Exception:
+                        toolbar_mode = ''
+
+                    if self.auto_scroll and not toolbar_mode:
+                        window_size = 10.0
+                        if current_time_rel > window_size:
+                            self.ax_live.set_xlim(current_time_rel - window_size, current_time_rel)
+                        else:
+                            self.ax_live.set_xlim(0, max(current_time_rel, window_size))
+                    
+                    self.canvas_live.draw_idle()
 
 
             # Atualiza labels e dashboard

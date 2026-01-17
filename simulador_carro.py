@@ -126,7 +126,9 @@ try:
         # 1. MOTOR (0x100)
         # RPM(2), Temp(1), TPS(1), Lambda(1)
         # Lambda varia rico/pobre aleatoriamente perto de 1.00
+        # Lambda escala: 0.01 por bit (0-255 = 0.00-2.55)
         lam_val = int(100 * (1.0 + random.uniform(-0.1, 0.1))) if carro.throttle_pos > 0 else 100
+        lam_val = max(0, min(255, lam_val))  # Clamp 0-255
         data_motor = struct.pack('<HBBB', int(carro.rpm), int(carro.temp_motor), int(carro.throttle_pos), lam_val) + b'\x00\x00\x00'
         bus.send(can.Message(arbitration_id=256, data=data_motor, is_extended_id=False))
         

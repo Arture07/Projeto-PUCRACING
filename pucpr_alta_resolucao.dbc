@@ -1,0 +1,143 @@
+VERSION ""
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+
+BS_:
+
+BU_: Central Motor Suspensao IMU
+
+CM_ "PUCPR Racing Formula SAE - DBC com Alta Resolução";
+CM_ "Otimizado para Engenharia de Competição";
+CM_ "Alterado: Factor de escala para maior precisão";
+
+# ============================================================================
+# MENSAGEM 256 (0x100): Dados do Motor - ALTA PRIORIDADE
+# Taxa de envio: 50 Hz (a cada 20ms)
+# Tamanho: 8 bytes (64 bits)
+# ============================================================================
+BO_ 256 Motor: 8 Motor
+ SG_ RPM : 0|16@1+ (1,0) [0|14000] "rpm" Central
+ # MUDANÇA: Temperatura agora com 0.1°C de resolução (antes: 1°C)
+ # Permite detectar aquecimento gradual antes de crítico
+ SG_ Temperatura : 16|16@1+ (0.1,-40) [-40|150] "C" Central
+ # MUDANÇA: TPS agora com 0.1% de resolução (antes: 1%)
+ # Análise precisa de modulação do acelerador pelo piloto
+ SG_ ThrottlePos : 32|8@1+ (0.1,0) [0|100] "%" Central
+ # MUDANÇA: Lambda agora com 0.001 de resolução (antes: 0.01)
+ # Ajuste fino de mistura ar/combustível para máxima potência
+ SG_ Lambda : 40|16@1+ (0.001,0) [0.5|1.5] "lambda" Central
+
+# ============================================================================
+# MENSAGEM 272 (0x110): Velocidade das Rodas - MÉDIA PRIORIDADE
+# Taxa de envio: 10 Hz (a cada 100ms)
+# Tamanho: 8 bytes (64 bits)
+# ============================================================================
+BO_ 272 Rodas: 8 Motor
+ # MUDANÇA: Velocidade com 0.1 km/h de resolução (antes: 1 km/h)
+ # Detecta diferenças sutis entre rodas (indicativo de slip)
+ SG_ WheelSpeed_FL : 0|16@1+ (0.1,0) [0|300] "kmh" Central
+ SG_ WheelSpeed_FR : 16|16@1+ (0.1,0) [0|300] "kmh" Central
+ SG_ WheelSpeed_RL : 32|16@1+ (0.1,0) [0|300] "kmh" Central
+ SG_ WheelSpeed_RR : 48|16@1+ (0.1,0) [0|300] "kmh" Central
+
+# ============================================================================
+# MENSAGEM 512 (0x200): Suspensão - ALTA PRIORIDADE
+# Taxa de envio: 50 Hz (a cada 20ms)
+# Tamanho: 8 bytes (64 bits)
+# ============================================================================
+BO_ 512 Suspensao: 8 Suspensao
+ # MUDANÇA: Suspensão com 0.1mm de resolução (antes: 1mm)
+ # Análise detalhada de ride height e movimentos em curvas
+ # Correlaciona com aceleração lateral para setup de geometria
+ SG_ SuspensionPos_FL : 0|16@1+ (0.1,0) [0|200] "mm" Central
+ SG_ SuspensionPos_FR : 16|16@1+ (0.1,0) [0|200] "mm" Central
+ SG_ SuspensionPos_RL : 32|16@1+ (0.1,0) [0|200] "mm" Central
+ SG_ SuspensionPos_RR : 48|16@1+ (0.1,0) [0|200] "mm" Central
+
+# ============================================================================
+# MENSAGEM 288 (0x120): Direção e Freio - ALTA PRIORIDADE
+# Taxa de envio: 50 Hz (a cada 20ms)
+# Tamanho: 5 bytes (40 bits)
+# ============================================================================
+BO_ 288 Direcao: 8 Motor
+ # MUDANÇA: Ângulo de direção já estava em 0.1° (mantido)
+ # Permite análise de entrada em curvas e correções do piloto
+ SG_ SteeringAngle : 0|16@1- (0.1,0) [-720|720] "deg" Central
+ # MUDANÇA: Pressão de freio com 0.1 bar de resolução (antes: 1 bar)
+ # Telemetria de modulação de frenagem e trail braking
+ SG_ BrakePressure : 16|16@1+ (0.1,0) [0|200] "bar" Central
+ # NOVO: Nível de bateria (baixa prioridade, enviado a 1 Hz via downsampling)
+ SG_ BatteryVoltage : 32|8@1+ (0.1,0) [0|25.5] "V" Central
+
+# ============================================================================
+# MENSAGEM 768 (0x300): IMU (Acelerômetro) - ALTA PRIORIDADE
+# Taxa de envio: 50 Hz (a cada 20ms)
+# Tamanho: 4 bytes (32 bits)
+# ============================================================================
+BO_ 768 IMU: 8 IMU
+ # MUDANÇA: Aceleração já estava em 0.001G (mantido - excelente!)
+ # Permite análise de performance em curvas (Lateral G's)
+ # e frenagem/aceleração (Longitudinal G's)
+ SG_ AccelX : 0|16@1- (0.001,0) [-4|4] "g" Central
+ SG_ AccelY : 16|16@1- (0.001,0) [-4|4] "g" Central
+
+# ============================================================================
+# MENSAGEM 784 (0x310): GPS (Baixa Prioridade)
+# Taxa de envio: 1 Hz (a cada 1000ms) via downsampling
+# Tamanho: 8 bytes (64 bits)
+# ============================================================================
+BO_ 784 GPS: 8 Central
+ # Latitude/Longitude com 6 casas decimais (precisão ~10cm)
+ # Formato: graus × 1000000 (ex: -25.123456 → -25123456)
+ SG_ Latitude : 0|32@1- (0.000001,0) [-90|90] "deg" Central
+ SG_ Longitude : 32|32@1- (0.000001,0) [-180|180] "deg" Central
+
+# ============================================================================
+# COMENTÁRIOS TÉCNICOS
+# ============================================================================
+
+CM_ SG_ 256 Temperatura "Sensor de temperatura do líquido de arrefecimento. Offset de -40°C permite medir temperatura ambiente antes da partida.";
+CM_ SG_ 256 Lambda "Relação lambda (1.0 = mistura estequiométrica). Valores < 1.0 = rica, > 1.0 = pobre. Motor a gasolina ideal: 0.90-0.95 em plena carga.";
+CM_ SG_ 272 WheelSpeed_FL "Velocidade da roda dianteira esquerda. Resolução de 0.1 km/h permite detectar slip antes de perda total de tração.";
+CM_ SG_ 512 SuspensionPos_FL "Posição do amortecedor (0mm = totalmente comprimido, 200mm = totalmente estendido). Resolução de 0.1mm para análise fina de geometria.";
+CM_ SG_ 288 SteeringAngle "Ângulo do volante (negativo = esquerda, positivo = direita). Range amplo (-720° a +720°) permite até 2 voltas completas.";
+CM_ SG_ 288 BrakePressure "Pressão hidráulica no cilindro mestre. Resolução de 0.1 bar permite análise de modulação e trail braking.";
+CM_ SG_ 768 AccelX "Aceleração longitudinal (positivo = aceleração, negativo = frenagem). Típico: -1.5G frenagem, +0.8G aceleração.";
+CM_ SG_ 768 AccelY "Aceleração lateral (positivo = curva direita, negativo = curva esquerda). Típico: ±1.2G em curvas rápidas.";
+
+# ============================================================================
+# TABELA DE COMPARAÇÃO: ANTES vs DEPOIS
+# ============================================================================
+# 
+# Sinal           | Resolução Antiga | Resolução Nova | Bits Antes | Bits Agora | Ganho
+# ----------------|------------------|----------------|------------|------------|-------
+# Temperatura     | 1°C              | 0.1°C          | 8          | 16         | 10x
+# TPS             | 1%               | 0.1%           | 8          | 8          | 10x
+# Lambda          | 0.01             | 0.001          | 8          | 16         | 10x
+# WheelSpeed      | 1 km/h           | 0.1 km/h       | 8          | 16         | 10x
+# Suspensão       | 1 mm             | 0.1 mm         | 8          | 16         | 10x
+# BrakePressure   | 1 bar            | 0.1 bar        | 8          | 16         | 10x
+# 
+# CUSTO: Pacotes CAN maiores (mais uso de barramento)
+# BENEFÍCIO: Precisão 10x maior para análise de engenharia
+# ESTRATÉGIA: Usar downsampling em central.py para otimizar banda LoRa
+# 
+# ============================================================================
+
+# ============================================================================
+# VALORES ENUMERADOS (Opcional - para status discretos)
+# ============================================================================
+
+# Exemplo: Estados do motor
+VAL_ 256 EngineState 0 "Desligado" 1 "Dando_Partida" 2 "Em_Marcha_Lenta" 3 "Operando" 4 "Alerta" 5 "Critico";
+
+# ============================================================================
+# ATRIBUTOS (Opcional - metadados adicionais)
+# ============================================================================
+
+BA_DEF_ "BusType" STRING;
+BA_ "BusType" "CAN";

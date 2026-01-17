@@ -1,0 +1,22 @@
+# PUCPR Racing - Requisitos do Projeto
+# Instalação: pip install -r requirements.txt
+
+# Interface Gráfica
+customtkinter>=5.0.0
+pillow>=9.0.0
+
+# Visualização de Dados
+matplotlib>=3.5.0
+numpy>=1.21.0
+pandas>=1.3.0
+
+# Telemetria CAN
+python-can>=4.0.0
+cantools>=36.0.0
+msgpack>=1.0.0
+
+# Comunicação Serial (LoRa)
+pyserial>=3.5
+
+# Processamento de Dados
+scipy>=1.7.0

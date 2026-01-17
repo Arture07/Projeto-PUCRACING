@@ -40,7 +40,7 @@ from core.constants import (
 from core import analysis_callbacks
 
 # Importa módulos GUI
-from core import telemetry_realtime
+from core import telemetry_realtime, lora_receiver
 from gui import dashboards, live_plotting
 
 # Configura estilo matplotlib
@@ -1108,7 +1108,25 @@ class AppAnalisePUCPR(ctk.CTk):
         live_plotting.abrir_seletor_canais_live(self)
 
     def toggle_live_telemetry(self):
-        telemetry_realtime.toggle_live_telemetry(self)
+        """Alterna telemetria (detecta fonte automaticamente)."""
+        # Verifica se deve usar LoRa ou CAN
+        try:
+            import json
+            with open('telemetry_source.json', 'r') as f:
+                config = json.load(f)
+                source = config.get('source', 'simulator')
+        except:
+            source = 'simulator'  # Padrão
+        
+        if source == 'lora_serial':
+            # Usa LoRa
+            if not self.is_live_active:
+                lora_receiver.start_lora_telemetry(self)
+            else:
+                lora_receiver.stop_lora_telemetry(self)
+        else:
+            # Usa CAN (padrão)
+            telemetry_realtime.toggle_live_telemetry(self)
 
     def start_live_telemetry(self):
         telemetry_realtime.start_live_telemetry(self)

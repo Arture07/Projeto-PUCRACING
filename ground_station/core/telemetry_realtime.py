@@ -73,9 +73,10 @@ def loop_leitura_can(app_instance):
     
     db = None
     try:
-        # Tenta carregar DBC (mesmo diretório)
-        if os.path.exists('pucpr.dbc'):
-            db = cantools.database.load_file('pucpr.dbc')
+        # Tenta carregar DBC (pasta config)
+        dbc_path = '../config/pucpr.dbc'
+        if os.path.exists(dbc_path):
+            db = cantools.database.load_file(dbc_path)
         else:
             print("Aviso: pucpr.dbc não encontrado. Tentando ler raw.")
     except Exception as e:

@@ -47,7 +47,7 @@ import os
 # CAN Bus
 CAN_INTERFACE = 'can0'  # SocketCAN no Linux
 CAN_BITRATE = 500000    # 500 kbps
-DBC_FILE = 'pucpr.dbc'  # Arquivo de definição CAN
+DBC_FILE = '../config/pucpr.dbc'  # Arquivo de definição CAN
 
 # LoRa Serial
 LORA_PORT = '/dev/ttyUSB0'  # Porta serial do módulo LoRa
@@ -64,8 +64,8 @@ START_MARKER = b'\xAA\x55'
 END_MARKER = b'\x55\xAA'
 
 # Data Logging
-LOG_DIRECTORY = './logs'  # Diretório para salvar logs CSV
-ENABLE_LOGGING = True     # Ativar/desativar gravação de logs
+LOG_DIRECTORY = '../logs'  # Diretório para salvar logs CSV
+ENABLE_LOGGING = True      # Ativar/desativar gravação de logs
 
 # ============================================================================
 # ESTRUTURA DE DADOS (mesmo formato do lora_receiver.py)

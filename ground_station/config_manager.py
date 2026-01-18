@@ -4,7 +4,7 @@ from tkinter import messagebox
 from typing import Dict, Tuple, List, Optional, Union
 import pandas as pd # Para type hinting
 
-CONFIG_FILE = 'config_pucpr_tool.ini'
+CONFIG_FILE = '../config/config_pucpr_tool.ini'
 
 def load_config() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
     """

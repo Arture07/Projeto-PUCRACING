@@ -34,6 +34,8 @@ import struct
 import time
 import serial
 import threading
+import csv
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
 import os
@@ -60,6 +62,10 @@ RATE_LOW_PRIORITY = 1        # Temperatura, Bateria, GPS
 USE_PACKET_MARKERS = True
 START_MARKER = b'\xAA\x55'
 END_MARKER = b'\x55\xAA'
+
+# Data Logging
+LOG_DIRECTORY = './logs'  # Diretório para salvar logs CSV
+ENABLE_LOGGING = True     # Ativar/desativar gravação de logs
 
 # ============================================================================
 # ESTRUTURA DE DADOS (mesmo formato do lora_receiver.py)
@@ -497,6 +503,12 @@ class TelemetrySystem:
         # (reutilizados quando não é hora de atualizar)
         self.cached_data = TelemetryData()
         
+        # Data Logging
+        self.csv_file = None
+        self.csv_writer = None
+        self.log_filename = None
+        self.samples_logged = 0
+        
         self.running = False
     
     def start(self) -> bool:
@@ -516,10 +528,17 @@ class TelemetrySystem:
             self.can_receiver.stop()
             return False
         
+        # Iniciar data logging
+        if ENABLE_LOGGING:
+            if not self.start_logging():
+                print("[Sistema] Aviso: Falha ao iniciar logging (continuando sem gravar)")
+        
         print(f"\n[Sistema] Iniciado com sucesso!")
         print(f"  CAN: {CAN_INTERFACE} @ {CAN_BITRATE} bps")
         print(f"  LoRa: {LORA_PORT} @ {LORA_BAUD} baud")
         print(f"  Taxa de transmissão: {RATE_HIGH_PRIORITY} Hz (downsampling ativo)")
+        if ENABLE_LOGGING and self.csv_file:
+            print(f"  Data Logging: {self.log_filename}")
         print("\nPressione Ctrl+C para parar\n")
         
         return True
@@ -593,8 +612,12 @@ class TelemetrySystem:
                 else:
                     packet.temperatura = self.cached_data.temperatura
                 
-                # Enviar pacote
+                # Enviar pacote via LoRa (com downsampling)
                 self.lora_transmitter.send_packet(packet)
+                
+                # Gravar dados COMPLETOS no CSV (sem downsampling)
+                if ENABLE_LOGGING and self.csv_writer:
+                    self.log_data(current)
                 
                 # Incrementar contador de ciclos
                 self.downsampler.increment_cycle()
@@ -630,7 +653,102 @@ class TelemetrySystem:
         print(f"  CAN RX: {self.can_receiver.messages_received} mensagens")
         print(f"  Banda: {lora_stats.get('bytes_per_sec', 0)} bytes/s "
               f"({lora_stats.get('kbps', 0):.1f} kbps)")
+        if ENABLE_LOGGING:
+            print(f"  CSV Log: {self.samples_logged} amostras gravadas")
         print("-"*60)
+    
+    def start_logging(self) -> bool:
+        """Inicia gravação de dados em arquivo CSV"""
+        try:
+            # Criar diretório de logs se não existir
+            os.makedirs(LOG_DIRECTORY, exist_ok=True)
+            
+            # Gerar nome do arquivo com timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.log_filename = f"telemetria_pucpr_{timestamp}.csv"
+            filepath = os.path.join(LOG_DIRECTORY, self.log_filename)
+            
+            # Abrir arquivo CSV
+            self.csv_file = open(filepath, 'w', newline='')
+            self.csv_writer = csv.writer(self.csv_file)
+            
+            # Escrever cabeçalho
+            header = [
+                'Timestamp_ms',
+                'Datetime',
+                'RPM',
+                'Temperatura',
+                'TPS',
+                'Lambda',
+                'SteeringAngle',
+                'BrakePressure',
+                'AccelX',
+                'AccelY',
+                'WheelSpeed_FL',
+                'WheelSpeed_FR',
+                'WheelSpeed_RL',
+                'WheelSpeed_RR',
+                'Suspension_FL',
+                'Suspension_FR',
+                'Suspension_RL',
+                'Suspension_RR'
+            ]
+            self.csv_writer.writerow(header)
+            self.csv_file.flush()
+            
+            print(f"[CSV] Iniciando gravação: {filepath}")
+            return True
+            
+        except Exception as e:
+            print(f"[CSV] Erro ao criar arquivo: {e}")
+            return False
+    
+    def log_data(self, data: TelemetryData):
+        """Grava uma linha de dados no CSV"""
+        try:
+            # Timestamp atual em formato legível
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            
+            row = [
+                data.timestamp,
+                now,
+                data.rpm,
+                data.temperatura,
+                data.tps,
+                f"{data.lambda_:.3f}",
+                f"{data.steering_angle:.1f}",
+                data.brake_pressure,
+                f"{data.accel_x:.3f}",
+                f"{data.accel_y:.3f}",
+                data.wheel_fl,
+                data.wheel_fr,
+                data.wheel_rl,
+                data.wheel_rr,
+                data.susp_fl,
+                data.susp_fr,
+                data.susp_rl,
+                data.susp_rr
+            ]
+            
+            self.csv_writer.writerow(row)
+            self.samples_logged += 1
+            
+            # Flush a cada 100 amostras (2 segundos @ 50Hz) para não perder dados
+            if self.samples_logged % 100 == 0:
+                self.csv_file.flush()
+                
+        except Exception as e:
+            print(f"[CSV] Erro ao gravar dados: {e}")
+    
+    def stop_logging(self):
+        """Finaliza gravação e fecha arquivo CSV"""
+        if self.csv_file:
+            try:
+                self.csv_file.flush()
+                self.csv_file.close()
+                print(f"[CSV] Arquivo fechado: {self.samples_logged} amostras gravadas")
+            except Exception as e:
+                print(f"[CSV] Erro ao fechar arquivo: {e}")
     
     def stop(self):
         """Para sistema"""
@@ -638,6 +756,7 @@ class TelemetrySystem:
         self.running = False
         self.can_receiver.stop()
         self.lora_transmitter.disconnect()
+        self.stop_logging()
         print("[Sistema] Finalizado")
 
 

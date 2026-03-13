@@ -504,34 +504,60 @@ class AppAnalisePUCPR(ctk.CTk):
         self.atualizar_status("Abrindo seletor de arquivo...")
         filepath = filedialog.askopenfilename(title="Selecionar Arquivo de Log (.csv)", filetypes=(("CSV Files", "*.csv"), ("All Files", "*.*")))
         if filepath:
-            self.atualizar_status(f"Carregando log: {os.path.basename(filepath)}...")
-            # Chama a função de carregamento do data_loader, passando o mapeamento de canais
-            self.data_frame = carregar_log_csv(filepath, self.channel_mapping)
-            if self.data_frame is not None:
-                self.current_filepath = filepath; filename = os.path.basename(filepath)
-                # Atualiza label com nome do arquivo (mostra apenas o final se for muito longo)
-                self.lbl_nome_arquivo.configure(text=f"Log: ...{filename[-35:]}" if len(filename) > 35 else f"Log: {filename}")
-
-                # Limpa estado anterior (número de voltas)
-                if 'LapNumber' in self.data_frame.columns: self.data_frame = self.data_frame.drop(columns=['LapNumber'])
-                self.lap_numbers_series = None
-
-                # Atualiza a interface gráfica
-                self.atualizar_lista_canais() # Popula a lista de checkboxes
-                self.atualizar_area_plot(title="Log carregado. Selecione canais para plotar.") # Limpa plot
-                self.habilitar_botoes_pos_carga(True) # Habilita botões de análise
-                self.limpar_labels_resultados() # Limpa textboxes de resultados anteriores
-                self.atualizar_status(f"Log '{filename}' carregado com sucesso ({len(self.data_frame)} linhas).")
-            else: # Falha no carregamento (carregar_log_csv retornou None)
-                self.current_filepath = ""; self.lbl_nome_arquivo.configure(text="Falha ao carregar log.")
-                self.data_frame = None; self.lap_numbers_series = None
-                self.atualizar_lista_canais(); self.atualizar_area_plot(title="Falha ao carregar log.")
-                self.habilitar_botoes_pos_carga(False); self.limpar_labels_resultados()
-                # Mensagem de erro já deve ter sido mostrada por carregar_log_csv
-                self.atualizar_status("Falha ao carregar o arquivo de log.")
+            self.atualizar_status(f"Carregando log: {os.path.basename(filepath)} em segundo plano...")
+            # Desabilita botões temporariamente
+            self.habilitar_botoes_pos_carga(False)
+            # Executa a leitura em uma Thread separada
+            threading.Thread(target=self._carregar_log_thread, args=(filepath,), daemon=True).start()
         else:
             self.atualizar_status("Seleção de arquivo cancelada.")
 
+    def _carregar_log_thread(self, filepath):
+        """Thread separada para carregar o log sem travar a interface."""
+        try:
+            df_carregado = carregar_log_csv(filepath, self.channel_mapping)
+            self.after(0, lambda: self._finalizar_carga_log(df_carregado, filepath))
+        except Exception as e:
+            self.after(0, lambda: self._falha_carga_log(filepath, str(e)))
+
+    def _finalizar_carga_log(self, df_carregado, filepath):
+        """Finaliza o carregamento do log na thread principal."""
+        self.data_frame = df_carregado
+        if self.data_frame is not None:
+            self.current_filepath = filepath
+            filename = os.path.basename(filepath)
+            
+            # Atualiza label com nome do arquivo (mostra apenas o final se for muito longo)
+            self.lbl_nome_arquivo.configure(text=f"Log: ...{filename[-35:]}" if len(filename) > 35 else f"Log: {filename}")
+
+            # Limpa estado anterior (número de voltas)
+            if 'LapNumber' in self.data_frame.columns: 
+                self.data_frame = self.data_frame.drop(columns=['LapNumber'])
+            self.lap_numbers_series = None
+
+            # Atualiza a interface gráfica
+            self.atualizar_lista_canais() # Popula a lista de checkboxes
+            self.atualizar_area_plot(title="Log carregado. Selecione canais para plotar.") # Limpa plot
+            self.habilitar_botoes_pos_carga(True) # Habilita botões de análise
+            self.limpar_labels_resultados() # Limpa textboxes de resultados anteriores
+            self.atualizar_status(f"Log '{filename}' carregado com sucesso ({len(self.data_frame)} linhas).")
+        else:
+            self._falha_carga_log(filepath, "Falha interna ao carregar arquivo.")
+
+    def _falha_carga_log(self, filepath, erro_msg=""):
+        """Lida com falha de carregamento na thread principal."""
+        self.current_filepath = ""
+        self.lbl_nome_arquivo.configure(text="Falha ao carregar log.")
+        self.data_frame = None
+        self.lap_numbers_series = None
+        self.atualizar_lista_canais()
+        self.atualizar_area_plot(title="Falha ao carregar log.")
+        self.habilitar_botoes_pos_carga(False)
+        self.limpar_labels_resultados()
+        if erro_msg:
+            print(f"Erro no carregamento do log: {erro_msg}")
+        self.atualizar_status("Falha ao carregar o arquivo de log.")
+        
     def limpar_labels_resultados(self):
         """Limpa o texto de todos os textboxes de resultado nas abas específicas."""
         # Usa os nomes das abas como configurados (com ícones)

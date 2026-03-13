@@ -1,5 +1,5 @@
 # PUCPR Racing - Requisitos do Projeto
-# Instalação: pip install -r requirements.txt
+# Instalação: pip install -r requirements.txt ou python -m pip install -r requirements.txt
 
 # Interface Gráfica
 customtkinter>=5.0.0

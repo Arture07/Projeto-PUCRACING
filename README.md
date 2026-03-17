@@ -91,6 +91,23 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## 📈 Grafana em Tempo Real (Opcional)
+
+Para visualizar os dados em dashboard web (Grafana), o Ground Station agora pode espelhar telemetria para InfluxDB.
+
+1. Ajuste `config/config_pucpr_tool.ini` na seção `[INFLUXDB]`:
+  - `enabled = true`
+  - `url`, `token`, `org`, `bucket`
+2. Rode o Ground Station normalmente (`ground_station/main.py`).
+3. No Grafana, crie datasource InfluxDB e um painel usando o measurement `telemetry_live`.
+4. Para importar um painel pronto, use `docs/grafana_dashboard_live.json`.
+5. Para abrir dentro do app, use o botão `🌐 Grafana Live` na barra lateral.
+
+Para ajustar a janela embutida, edite `[GRAFANA]` em `config/config_pucpr_tool.ini` (`url`, `query`, `title`, `width`, `height`).
+Se o embed não iniciar no seu ambiente, o app faz fallback e abre no navegador padrão.
+
+Tags gravadas automaticamente: `session_id` e `source`.
+
 ## ⚙️ Funcionalidades
 
 ### Ground Station

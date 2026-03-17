@@ -40,6 +40,7 @@ import threading
 import time
 from typing import Optional, Dict, Any
 from collections import deque
+from core.influx_bridge import ensure_influx_bridge, stop_influx_bridge, publish_influx
 
 # Constantes do protocolo
 PACKET_SIZE = 36  # Tamanho total da struct em bytes
@@ -352,6 +353,9 @@ def start_lora_telemetry(app_instance, port: Optional[str] = None):
         app_instance.is_live_active = True
         app_instance.start_time_live = time.time()
         app_instance.live_data_storage = {'Time': []}
+
+        source = getattr(app_instance, 'live_source', 'lora_serial')
+        ensure_influx_bridge(app_instance, source=source)
         
         # Atualiza UI
         app_instance.btn_live_toggle.configure(text="⏹️ Parar LoRa", fg_color="#C62828")
@@ -370,6 +374,8 @@ def stop_lora_telemetry(app_instance):
     """Para telemetria LoRa."""
     if hasattr(app_instance, 'lora_receiver'):
         app_instance.lora_receiver.stop()
+
+    stop_influx_bridge(app_instance)
     
     app_instance.is_live_active = False
     app_instance.btn_live_toggle.configure(text="▶️ Iniciar LoRa", fg_color="#D32F2F")
@@ -426,6 +432,8 @@ def update_lora_gui(app_instance):
         # Atualiza dashboards (reutiliza função existente)
         from core.telemetry_realtime import _update_dashboard_labels
         _update_dashboard_labels(app_instance, dados_recentes)
+
+        publish_influx(app_instance, dados_recentes, timestamp_ns=time.time_ns())
         
         # Atualiza gráfico (reutiliza código do live_plotting)
         if not app_instance.live_freeze and len(app_instance.live_data_storage['Time']) > 1:

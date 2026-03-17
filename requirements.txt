@@ -20,3 +20,7 @@ pyserial>=3.5
 
 # Processamento de Dados
 scipy>=1.7.0
+
+# Grafana/InfluxDB (tempo real)
+influxdb-client>=1.45.0
+pywebview>=5.2

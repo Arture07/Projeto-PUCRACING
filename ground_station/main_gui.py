@@ -40,7 +40,7 @@ from core.constants import (
 from core import analysis_callbacks
 
 # Importa módulos GUI
-from core import telemetry_realtime, lora_receiver
+from core import telemetry_realtime, lora_receiver, grafana_embed
 from gui import dashboards, live_plotting
 
 # Configura estilo matplotlib
@@ -132,6 +132,11 @@ class AppAnalisePUCPR(ctk.CTk):
         self._live_hover_vline = None
         self._live_hover_pinned = False
         self._live_hover_pinned_idx: Optional[int] = None
+
+        self.live_source = 'simulator'
+        self.influx_bridge = None
+        self.influx_session_id = ""
+        self.grafana_embed_process: Optional[Any] = None
 
         # --- Barra de Menu ---
         self._criar_menu()
@@ -276,6 +281,10 @@ class AppAnalisePUCPR(ctk.CTk):
         self.btn_abrir_log = ctk.CTkButton(self.painel_controle, text="📁 Abrir Log (.csv)", command=self.abrir_arquivo_log,
                                            fg_color=COLOR_ACCENT_RED, hover_color="#A00000", text_color=COLOR_TEXT_PRIMARY, font=self.DEFAULT_FONT_BOLD) # Usa self.
         self.btn_abrir_log.pack(pady=(15, 10), padx=15, fill="x") # Aumenta padx interno
+
+        self.btn_grafana_live = ctk.CTkButton(self.painel_controle, text="🌐 Grafana Live", command=self.abrir_grafana_embutido,
+                              fg_color=COLOR_ACCENT_CYAN, hover_color="#00B8D4", text_color=COLOR_TEXT_PRIMARY, font=self.DEFAULT_FONT_BOLD)
+        self.btn_grafana_live.pack(pady=(0, 10), padx=15, fill="x")
 
         # Label para nome do arquivo
         self.lbl_nome_arquivo = ctk.CTkLabel(self.painel_controle, text="Nenhum log carregado", text_color=COLOR_TEXT_SECONDARY,
@@ -1143,6 +1152,8 @@ class AppAnalisePUCPR(ctk.CTk):
                 source = config.get('source', 'simulator')
         except:
             source = 'simulator'  # Padrão
+
+        self.live_source = source
         
         if source == 'lora_serial':
             # Usa LoRa
@@ -1165,6 +1176,9 @@ class AppAnalisePUCPR(ctk.CTk):
 
     def update_live_gui(self):
         telemetry_realtime.update_live_gui(self)
+
+    def abrir_grafana_embutido(self):
+        grafana_embed.open_grafana_embedded(self)
 
 # --- Bloco Principal ---
 if __name__ == "__main__":

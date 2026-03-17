@@ -9,7 +9,11 @@ from typing import List, Optional, Dict
 from config_manager import get_channel_name
 
 # Importa cores (ou define aqui)
-COLOR_PRIMARY_BG = "#2B2B2B"; COLOR_SECONDARY_BG = "#1E1E1E"; COLOR_RED = "#E53935"; COLOR_GOLD = "#FFA000"; COLOR_TEXT = "#E0E0E0"
+COLOR_PRIMARY_BG = "#2B2B2B"
+COLOR_SECONDARY_BG = "#1E1E1E"
+COLOR_RED = "#E53935"
+COLOR_GOLD = "#FFA000"
+COLOR_TEXT = "#E0E0E0"
 
 # ==============================================================================
 # MÓDULO: plotting.py

@@ -25,6 +25,7 @@ from core.constants import (
     COLOR_ACCENT_RED, COLOR_ACCENT_GOLD, 
     COLOR_ACCENT_GREEN, COLOR_ACCENT_CYAN
 )
+from core.influx_bridge import ensure_influx_bridge, stop_influx_bridge, publish_influx
 
 
 def toggle_live_telemetry(app_instance):
@@ -44,6 +45,9 @@ def start_live_telemetry(app_instance):
     app_instance.live_data_storage = {'Time': []}
     
     app_instance.start_time_live = time.time()
+
+    source = getattr(app_instance, 'live_source', 'simulator')
+    ensure_influx_bridge(app_instance, source=source)
     
     # Configura gráfico inicial
     app_instance.update_live_plot_style()
@@ -61,6 +65,7 @@ def stop_live_telemetry(app_instance):
     """Para a thread de leitura CAN."""
     app_instance.is_live_active = False
     app_instance.stop_live_event.set()
+    stop_influx_bridge(app_instance)
     app_instance.btn_live_toggle.configure(text="▶️ Iniciar Telemetria", fg_color=COLOR_ACCENT_RED)
     app_instance.lbl_live_status.configure(text="Status: Parado")
 
@@ -152,6 +157,8 @@ def update_live_gui(app_instance):
                         app_instance.ax_live.set_xlim(0, t_data[-1])
             except Exception:
                 pass
+
+            publish_influx(app_instance, dados_recentes, timestamp_ns=time.time_ns())
 
             # Atualiza indicador de Hz (com base no tempo relativo)
             current_time_rel = time.time() - app_instance.start_time_live

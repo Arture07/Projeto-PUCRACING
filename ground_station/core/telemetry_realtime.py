@@ -343,7 +343,33 @@ def _update_dashboard_labels(app_instance, dados_recentes):
         if hasattr(app_instance, 'lbl_dash_accel_y'): 
             app_instance.lbl_dash_accel_y.configure(text=txt)
     
-    # Rodas
+    # GPS / Mapa
+    if 'GPS_Lat' in dados_recentes and 'GPS_Lon' in dados_recentes:
+        lat = dados_recentes.get('GPS_Lat')
+        lon = dados_recentes.get('GPS_Lon')
+        if lat is not None and lon is not None:
+            # Filtro básico para coordenadas válidas (ex: não zero absoluto se não for esperado)
+            if not (abs(lat) < 0.1 and abs(lon) < 0.1): 
+                app_instance.lbl_dash_coord.configure(text=f"{lat:.5f}, {lon:.5f}")
+                
+                # Atualizando o mapa
+                if hasattr(app_instance, 'map_widget'):
+                    app_instance.map_widget.set_position(lat, lon)
+                    if hasattr(app_instance, 'map_marker_carro'):
+                        app_instance.map_marker_carro.set_position(lat, lon)
+                    if hasattr(app_instance, 'map_path_coords'):
+                        app_instance.map_path_coords.append((lat, lon))
+                        # Manter histórico de últimos 1000 pontos
+                        if len(app_instance.map_path_coords) > 1000:
+                            app_instance.map_path_coords.pop(0)
+                        app_instance.map_path.set_position_list(app_instance.map_path_coords)
+
+    if 'GPS_Speed' in dados_recentes:
+        vel = dados_recentes.get('GPS_Speed')
+        if vel is not None:
+            app_instance.lbl_dash_speed.configure(text=f"{vel:.1f}")
+            
+    # Rodas (Wheel Speeds)
     if 'WheelSpeed_FL' in dados_recentes:
         txt = f"{dados_recentes['WheelSpeed_FL']:.0f}"
         app_instance.lbl_val_ws_fl.configure(text=txt)
@@ -367,28 +393,3 @@ def _update_dashboard_labels(app_instance, dados_recentes):
         app_instance.lbl_val_ws_rr.configure(text=txt)
         if hasattr(app_instance, 'lbl_dash_ws_rr'): 
             app_instance.lbl_dash_ws_rr.configure(text=txt)
-
-    # Suspensão
-    if 'SuspensionPos_FL' in dados_recentes:
-        txt = f"{dados_recentes['SuspensionPos_FL']:.0f}"
-        app_instance.lbl_val_susp_fl.configure(text=txt)
-        if hasattr(app_instance, 'lbl_dash_susp_fl'): 
-            app_instance.lbl_dash_susp_fl.configure(text=txt)
-
-    if 'SuspensionPos_FR' in dados_recentes:
-        txt = f"{dados_recentes['SuspensionPos_FR']:.0f}"
-        app_instance.lbl_val_susp_fr.configure(text=txt)
-        if hasattr(app_instance, 'lbl_dash_susp_fr'): 
-            app_instance.lbl_dash_susp_fr.configure(text=txt)
-
-    if 'SuspensionPos_RL' in dados_recentes:
-        txt = f"{dados_recentes['SuspensionPos_RL']:.0f}"
-        app_instance.lbl_val_susp_rl.configure(text=txt)
-        if hasattr(app_instance, 'lbl_dash_susp_rl'): 
-            app_instance.lbl_dash_susp_rl.configure(text=txt)
-
-    if 'SuspensionPos_RR' in dados_recentes:
-        txt = f"{dados_recentes['SuspensionPos_RR']:.0f}"
-        app_instance.lbl_val_susp_rr.configure(text=txt)
-        if hasattr(app_instance, 'lbl_dash_susp_rr'): 
-            app_instance.lbl_dash_susp_rr.configure(text=txt)

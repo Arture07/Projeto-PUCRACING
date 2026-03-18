@@ -4,6 +4,37 @@ import math
 import struct
 import random
 
+# Pontos aproximados do traçado de Interlagos (Autódromo José Carlos Pace)
+interlagos_track = [
+    (-23.701193, -46.697525), # Start/Finish
+    (-23.703191, -46.695843), 
+    (-23.704187, -46.695337), # Senna
+    (-23.704583, -46.696142), 
+    (-23.704403, -46.697087), # Curva do Sol
+    (-23.701449, -46.698822), # Reta oposta
+    (-23.700548, -46.699196), 
+    (-23.699042, -46.699067), # Ferradura
+    (-23.698649, -46.696750), # Laranjinha
+    (-23.699313, -46.695537), # Pinheirinho
+    (-23.700143, -46.694679), # Bico de Pato
+    (-23.701048, -46.694293), # Mergulho
+    (-23.702228, -46.694110), # Junção
+    (-23.702812, -46.695140), # Subida dos Boxes
+    (-23.701193, -46.697525)  # Start/Finish
+]
+
+def calc_dist(p1, p2):
+    dlat = (p2[0] - p1[0]) * 111111.0
+    dlon = (p2[1] - p1[1]) * math.cos(math.radians(p1[0])) * 111111.0
+    return math.hypot(dlat, dlon)
+
+track_segments = []
+total_track_len = 0
+for i in range(len(interlagos_track)-1):
+    d = calc_dist(interlagos_track[i], interlagos_track[i+1])
+    track_segments.append((total_track_len, total_track_len + d, interlagos_track[i], interlagos_track[i+1]))
+    total_track_len += d
+
 # --- CONFIGURAÇÃO DE FÍSICA ---
 class CarroDeCorrida:
     def __init__(self):
@@ -26,6 +57,12 @@ class CarroDeCorrida:
         self.distance = 0.0
         self.accel_x = 0.0
         self.accel_y = 0.0
+        
+        # Posição GPS inicial (Linha de Chegada de Interlagos)
+        self.lap_distance = 0.0
+        self.lat = interlagos_track[0][0]
+        self.lon = interlagos_track[0][1]
+        self.heading = 0.0 # Graus
 
     def update(self, dt):
         # 1. Simula Driver Inputs (Automático)
@@ -94,6 +131,29 @@ class CarroDeCorrida:
         vibration = (self.rpm / 12000) * 0.1
         self.accel_x += random.uniform(-vibration, vibration)
         self.accel_y += random.uniform(-vibration, vibration)
+        
+        # O esterçamento muda a orientação do carro (heading)
+        # Velocidade em m/s e raio da curva
+        if self.velocidade_kmh > 1:
+            turn_rate = (self.steering_angle / 180.0) * (self.velocidade_kmh / 20.0) # Taxa fictícia de rotação por s
+            self.heading = (self.heading + turn_rate * dt) % 360
+
+        # Atualiza a posição GPS no mapa de Interlagos
+        dist_percorrida = v_ms * dt # em metros
+        self.lap_distance += dist_percorrida
+        self.lap_distance %= total_track_len # Mantém o loop contínuo na pista
+        
+        # Encontra o segmento atual da pista baseado na distância percorrida da volta
+        for start_dist, end_dist, p1, p2 in track_segments:
+            if start_dist <= self.lap_distance <= end_dist:
+                seg_length = end_dist - start_dist
+                if seg_length > 0:
+                    ratio = (self.lap_distance - start_dist) / seg_length
+                    self.lat = p1[0] + (p2[0] - p1[0]) * ratio
+                    self.lon = p1[1] + (p2[1] - p1[1]) * ratio
+                else:
+                    self.lat, self.lon = p2
+                break
         
         # Temperatura sobe com RPM, desce com tempo (refrigeração)
         self.temp_motor += (self.rpm * 0.0001 - (self.temp_motor - 80)*0.1) * dt
@@ -170,6 +230,13 @@ try:
         ay_packed = int(carro.accel_y * 1000)
         data_imu = struct.pack('<hh', ax_packed, ay_packed) + b'\x00\x00\x00\x00'
         bus.send(can.Message(arbitration_id=768, data=data_imu, is_extended_id=False))
+        
+        # 6. GPS (0x320)
+        # Convert Lat/Lon to CAN layout: 32 bits (4 bytes) each, signed int, 1E-06 factor
+        lat_packed = int(carro.lat * 1000000)
+        lon_packed = int(carro.lon * 1000000)
+        data_gps = struct.pack('<ii', lat_packed, lon_packed)
+        bus.send(can.Message(arbitration_id=800, data=data_gps, is_extended_id=False))
         
         # Debug (menos frequente para não poluir)
         # if int(current_time * 10) % 10 == 0:

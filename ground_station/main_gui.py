@@ -415,9 +415,9 @@ class AppAnalisePUCPR(ctk.CTk):
         """Dashboard Rodas 2x2 com cores diferenciadas (Gold frontal, Red traseira)."""
         dashboards.criar_dash_rodas(self, parent)
 
-    def _criar_dash_suspensao(self, parent):
-        """Dashboard Suspensão 2x2 com cores diferenciadas (Cyan frontal, Green traseira)."""
-        dashboards.criar_dash_suspensao(self, parent)
+    def _criar_dash_mapa(self, parent):
+        """Dashboard Mapa para visualizar a posição na pista (GPS)."""
+        dashboards.criar_dash_mapa(self, parent)
 
     def _criar_card_sensor(self, parent, row, col, titulo, valor_inicial, unidade):
         """Cria card simples de sensor (método legado para compatibilidade)."""
@@ -429,18 +429,12 @@ class AppAnalisePUCPR(ctk.CTk):
         self.lbl_dash_ws_rl = self._criar_card_sensor(frame_rodas, 1, 0, "Wheel RL", "0", "km/h")
         self.lbl_dash_ws_rr = self._criar_card_sensor(frame_rodas, 1, 1, "Wheel RR", "0", "km/h")
 
-        # --- Suspensão ---
-        tab_susp = dash_tabs.tab("🛠️ Suspensão")
-        tab_susp.grid_columnconfigure((0, 1), weight=1)
-        tab_susp.grid_rowconfigure((0, 1), weight=1)
-        frame_susp = ctk.CTkFrame(tab_susp, fg_color="transparent")
-        frame_susp.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
-        frame_susp.grid_columnconfigure((0, 1), weight=1)
-
-        self.lbl_dash_susp_fl = self._criar_card_sensor(frame_susp, 0, 0, "Susp FL", "0", "mm")
-        self.lbl_dash_susp_fr = self._criar_card_sensor(frame_susp, 0, 1, "Susp FR", "0", "mm")
-        self.lbl_dash_susp_rl = self._criar_card_sensor(frame_susp, 1, 0, "Susp RL", "0", "mm")
-        self.lbl_dash_susp_rr = self._criar_card_sensor(frame_susp, 1, 1, "Susp RR", "0", "mm")
+        # --- Mapa (GPS) ---
+        tab_mapa = dash_tabs.tab("🗺️ Mapa (GPS)")
+        tab_mapa.grid_columnconfigure((0, 1), weight=1)
+        tab_mapa.grid_rowconfigure((0, 1), weight=1)
+        frame_mapa = ctk.CTkFrame(tab_mapa, fg_color="transparent")
+        frame_mapa.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
 
     def _criar_status_bar(self):
         """Cria a barra de status na parte inferior."""
@@ -449,9 +443,11 @@ class AppAnalisePUCPR(ctk.CTk):
         self.status_bar.grid(row=1, column=0, columnspan=2, padx=0, pady=0, sticky="ew") # Sem padx/pady externos
 
     def atualizar_status(self, mensagem: str):
-        """Atualiza o texto na barra de status."""
-        self.status_bar.configure(text=f"  {mensagem}") # Adiciona um pequeno espaço inicial
-        self.update_idletasks() # Força atualização da GUI para mostrar a mensagem imediatamente
+        self.status_label.configure(text=mensagem)
+        self.update_idletasks()
+
+    def atualizar_mapa_tempo_real(self, lat, lon):
+        pass  # Função a ser implementada para atualizar a posição no mapa
 
     def configurar_aba_especifica(self, nome_tab: str, acoes_botoes: List[tuple[str, callable]]):
         """Configura o conteúdo básico de uma aba de análise específica (Skidpad, Aceleração, etc.)."""
@@ -687,7 +683,6 @@ class AppAnalisePUCPR(ctk.CTk):
             if canal_cor_selecionado in self.data_frame.columns: canal_cor_usar = canal_cor_selecionado
             else: messagebox.showwarning("Aviso", f"Canal de cor '{canal_cor_selecionado}' não encontrado nos dados.")
 
-        # Plota o mapa usando a função do módulo plotting
         plotar_mapa_pista_nos_eixos(self.data_frame, self.canvas_plot, self.figura_plot, self.eixo_plot, lat_col, lon_col, canal_cor_usar)
         self.atualizar_status("Mapa da pista plotado.")
 
@@ -1101,6 +1096,7 @@ class AppAnalisePUCPR(ctk.CTk):
         frame_susp.pack(fill="x", pady=5)
         frame_susp.grid_columnconfigure((0,1), weight=1)
         
+               
         self.lbl_val_susp_fl = self._criar_card_sensor(frame_susp, 0, 0, "FL", "0", "mm")
         self.lbl_val_susp_fr = self._criar_card_sensor(frame_susp, 0, 1, "FR", "0", "mm")
         self.lbl_val_susp_rl = self._criar_card_sensor(frame_susp, 1, 0, "RL", "0", "mm")

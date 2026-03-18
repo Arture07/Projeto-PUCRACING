@@ -3,11 +3,13 @@ Módulo de criação de dashboards de tempo real para telemetria.
 Contém funções para criar as interfaces visuais dos dashboards (Motor/ECU, Pilotagem, Rodas, Suspensão).
 """
 
+import tkinter.messagebox as messagebox
 import customtkinter as ctk
+import tkintermapview
 from core.constants import (
     COLOR_BG_PRIMARY, COLOR_BG_SECONDARY, COLOR_BG_TERTIARY,
-    COLOR_ACCENT_RED, COLOR_ACCENT_GOLD, COLOR_ACCENT_CYAN, COLOR_ACCENT_GREEN,
-    COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_BORDER
+    COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_ACCENT_GOLD,
+    COLOR_ACCENT_RED, COLOR_ACCENT_CYAN, COLOR_BORDER
 )
 
 
@@ -34,12 +36,12 @@ def criar_conteudo_dashboards_tempo_real(app_instance):
     dash_tabs.add("⚙️ Motor/ECU")
     dash_tabs.add("🧭 Pilotagem")
     dash_tabs.add("🛞 Rodas")
-    dash_tabs.add("🛠️ Suspensão")
+    dash_tabs.add("🗺️ Mapa (GPS)")
 
     criar_dash_motor_ecu(app_instance, dash_tabs.tab("⚙️ Motor/ECU"))
     criar_dash_pilotagem(app_instance, dash_tabs.tab("🧭 Pilotagem"))
     criar_dash_rodas(app_instance, dash_tabs.tab("🛞 Rodas"))
-    criar_dash_suspensao(app_instance, dash_tabs.tab("🛠️ Suspensão"))
+    criar_dash_mapa(app_instance, dash_tabs.tab("🗺️ Mapa (GPS)"))
 
 
 def criar_dash_motor_ecu(app_instance, parent):
@@ -267,71 +269,67 @@ def criar_dash_rodas(app_instance, parent):
                  text_color=COLOR_TEXT_SECONDARY).pack(pady=(0, 15))
 
 
-def criar_dash_suspensao(app_instance, parent):
-    """Dashboard Suspensão 2x2 com cores diferenciadas (Cyan frontal, Green traseira)."""
+def criar_dash_mapa(app_instance, parent):
+    """Dashboard com visão do Mapa pelo GPS."""
     parent.grid_columnconfigure(0, weight=1)
     parent.grid_rowconfigure(0, weight=1)
     
     main = ctk.CTkFrame(parent, fg_color="transparent")
-    main.grid(row=0, column=0, sticky="nsew", padx=15, pady=15)
-    main.grid_columnconfigure((0, 1), weight=1, uniform="susp")
-    main.grid_rowconfigure((0, 1), weight=1, uniform="susp")
+    main.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
     
-    # FL (frontal esquerda - Cyan)
-    ffl = ctk.CTkFrame(main, fg_color=COLOR_BG_TERTIARY, corner_radius=12, 
-                       border_width=3, border_color=COLOR_ACCENT_CYAN)
-    ffl.grid(row=0, column=0, sticky="nsew", padx=(0, 10), pady=(0, 10))
-    ctk.CTkLabel(ffl, text="💠 SUSPENSÃO FRONTAL ESQUERDA", 
-                 font=ctk.CTkFont(size=10, weight="bold"), 
-                 text_color=COLOR_ACCENT_CYAN).pack(pady=(15, 5))
-    app_instance.lbl_dash_susp_fl = ctk.CTkLabel(ffl, text="0", 
-                                                  font=ctk.CTkFont(size=48, weight="bold"), 
-                                                  text_color=COLOR_TEXT_PRIMARY)
-    app_instance.lbl_dash_susp_fl.pack(pady=(5, 0))
-    ctk.CTkLabel(ffl, text="mm", font=ctk.CTkFont(size=16), 
-                 text_color=COLOR_TEXT_SECONDARY).pack(pady=(0, 15))
+    ctk.CTkLabel(main, text="Mapa GPS (Em Desenvolvimento)", font=ctk.CTkFont(size=18, weight="bold"), 
+                 text_color=COLOR_TEXT_PRIMARY).pack(pady=20)
     
-    # FR (frontal direita - Cyan)
-    ffr = ctk.CTkFrame(main, fg_color=COLOR_BG_TERTIARY, corner_radius=12, 
-                       border_width=3, border_color=COLOR_ACCENT_CYAN)
-    ffr.grid(row=0, column=1, sticky="nsew", padx=(10, 0), pady=(0, 10))
-    ctk.CTkLabel(ffr, text="💠 SUSPENSÃO FRONTAL DIREITA", 
-                 font=ctk.CTkFont(size=10, weight="bold"), 
-                 text_color=COLOR_ACCENT_CYAN).pack(pady=(15, 5))
-    app_instance.lbl_dash_susp_fr = ctk.CTkLabel(ffr, text="0", 
-                                                  font=ctk.CTkFont(size=48, weight="bold"), 
-                                                  text_color=COLOR_TEXT_PRIMARY)
-    app_instance.lbl_dash_susp_fr.pack(pady=(5, 0))
-    ctk.CTkLabel(ffr, text="mm", font=ctk.CTkFont(size=16), 
-                 text_color=COLOR_TEXT_SECONDARY).pack(pady=(0, 15))
+    # Linha: Velocidade + Coordenadas
+    f1 = ctk.CTkFrame(main, fg_color="transparent")
+    f1.pack(fill="x", pady=(0, 15))
+    f1.grid_columnconfigure((0, 1), weight=1)
     
-    # RL (traseira esquerda - Green)
-    frl = ctk.CTkFrame(main, fg_color=COLOR_BG_TERTIARY, corner_radius=12, 
-                       border_width=3, border_color=COLOR_ACCENT_GREEN)
-    frl.grid(row=1, column=0, sticky="nsew", padx=(0, 10), pady=(10, 0))
-    ctk.CTkLabel(frl, text="🟢 SUSPENSÃO TRASEIRA ESQUERDA", 
-                 font=ctk.CTkFont(size=10, weight="bold"), 
-                 text_color=COLOR_ACCENT_GREEN).pack(pady=(15, 5))
-    app_instance.lbl_dash_susp_rl = ctk.CTkLabel(frl, text="0", 
-                                                  font=ctk.CTkFont(size=48, weight="bold"), 
-                                                  text_color=COLOR_TEXT_PRIMARY)
-    app_instance.lbl_dash_susp_rl.pack(pady=(5, 0))
-    ctk.CTkLabel(frl, text="mm", font=ctk.CTkFont(size=16), 
-                 text_color=COLOR_TEXT_SECONDARY).pack(pady=(0, 15))
+    # Velocidade
+    fvel = ctk.CTkFrame(f1, fg_color=COLOR_BG_TERTIARY, corner_radius=12, 
+                        border_width=1, border_color=COLOR_BORDER)
+    fvel.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+    ctk.CTkLabel(fvel, text="VELOCIDADE", font=ctk.CTkFont(size=12, weight="bold"), 
+                 text_color=COLOR_TEXT_SECONDARY).pack(pady=(12, 0))
+    app_instance.lbl_dash_speed = ctk.CTkLabel(fvel, text="0", 
+                                               font=ctk.CTkFont(size=40, weight="bold"), 
+                                               text_color=COLOR_TEXT_PRIMARY)
+    app_instance.lbl_dash_speed.pack(pady=(5, 0))
+    ctk.CTkLabel(fvel, text="km/h", font=ctk.CTkFont(size=14), 
+                 text_color=COLOR_TEXT_SECONDARY).pack(pady=(0, 12))
     
-    # RR (traseira direita - Green)
-    frr = ctk.CTkFrame(main, fg_color=COLOR_BG_TERTIARY, corner_radius=12, 
-                       border_width=3, border_color=COLOR_ACCENT_GREEN)
-    frr.grid(row=1, column=1, sticky="nsew", padx=(10, 0), pady=(10, 0))
-    ctk.CTkLabel(frr, text="🟢 SUSPENSÃO TRASEIRA DIREITA", 
-                 font=ctk.CTkFont(size=10, weight="bold"), 
-                 text_color=COLOR_ACCENT_GREEN).pack(pady=(15, 5))
-    app_instance.lbl_dash_susp_rr = ctk.CTkLabel(frr, text="0", 
-                                                  font=ctk.CTkFont(size=48, weight="bold"), 
-                                                  text_color=COLOR_TEXT_PRIMARY)
-    app_instance.lbl_dash_susp_rr.pack(pady=(5, 0))
-    ctk.CTkLabel(frr, text="mm", font=ctk.CTkFont(size=16), 
-                 text_color=COLOR_TEXT_SECONDARY).pack(pady=(0, 15))
+    # Coordenadas
+    fcoord = ctk.CTkFrame(f1, fg_color=COLOR_BG_TERTIARY, corner_radius=12, 
+                          border_width=1, border_color=COLOR_BORDER)
+    fcoord.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+    ctk.CTkLabel(fcoord, text="COORDENADAS", font=ctk.CTkFont(size=12, weight="bold"), 
+                 text_color=COLOR_TEXT_SECONDARY).pack(pady=(12, 0))
+    app_instance.lbl_dash_coord = ctk.CTkLabel(fcoord, text="0.0000, 0.0000", 
+                                                font=ctk.CTkFont(size=36, weight="bold"), 
+                                                text_color=COLOR_TEXT_PRIMARY)
+    app_instance.lbl_dash_coord.pack(pady=(5, 0))
+    ctk.CTkLabel(fcoord, text="(LAT, LON)", font=ctk.CTkFont(size=14), 
+                 text_color=COLOR_TEXT_SECONDARY).pack(pady=(0, 12))
+    
+    # Mapa (Placeholder -> Mapa Real)
+    fmapa = ctk.CTkFrame(main, fg_color=COLOR_BG_TERTIARY, corner_radius=12, 
+                         border_width=1, border_color=COLOR_BORDER)
+    fmapa.pack(fill="both", expand=True, padx=0, pady=(10, 0))
+    
+    app_instance.map_widget = tkintermapview.TkinterMapView(fmapa, corner_radius=12)
+    app_instance.map_widget.pack(fill="both", expand=True, padx=2, pady=2)
+    
+    # Inicia com uma posição padrão (ex: PUC PR)
+    lat_inicial, lon_inicial = -25.4526, -49.2560 # Coordenadas PUCPR
+    app_instance.map_widget.set_position(lat_inicial, lon_inicial)
+    app_instance.map_widget.set_zoom(16)
+    
+    # Criar um marcador para o carro
+    app_instance.map_marker_carro = app_instance.map_widget.set_marker(lat_inicial, lon_inicial, text="Carro")
+    
+    # Lista para salvar o caminho percorrido e objeto path no map_widget
+    app_instance.map_path_coords = [(lat_inicial, lon_inicial)]
+    app_instance.map_path = app_instance.map_widget.set_path([app_instance.map_path_coords[0], app_instance.map_path_coords[0]], color=COLOR_ACCENT_GOLD, width=3)
 
 
 def criar_card_sensor(app_instance, parent, row, col, titulo, valor_inicial, unidade):

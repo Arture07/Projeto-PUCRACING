@@ -35,3 +35,6 @@ BO_ 288 Direcao: 8 Vector__XXX
 BO_ 768 IMU: 8 Vector__XXX
  SG_ AccelX : 0|16@1- (0.001,0) [-4|4] "g" Vector__XXX
  SG_ AccelY : 16|16@1- (0.001,0) [-4|4] "g" Vector__XXX
+BO_ 800 GPS: 8 Vector__XXX
+ SG_ GPS_Lat : 0|32@1- (1E-06,0) [-90|90] "deg" Vector__XXX
+ SG_ GPS_Lon : 32|32@1- (1E-06,0) [-180|180] "deg" Vector__XXX

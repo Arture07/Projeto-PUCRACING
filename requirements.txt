@@ -20,3 +20,6 @@ pyserial>=3.5
 
 # Processamento de Dados
 scipy>=1.7.0
+
+# Mapas
+tkintermapview>=1.29
